@@ -56,7 +56,10 @@ tests/   pytest (tests/), node tests (tests/js), Playwright smoke test (tests/e2
    bumping `project.rev`. `PUT /api/project` is refused with 409 `project_stale` when its `rev` is old, and the page
    reloads instead of overwriting a job's result. The server owns everything about the media (path, proxy, size,
    duration) and clips only enter through `/api/clips`; the page owns keeps, framing, subtitles, style, selection.
-   The UI flushes its pending save *before* starting a job and re-fetches (`reloadAfterJob`) after it.
+   The UI flushes its pending save *before* starting a job and re-fetches (`reloadAfterJob`) after it. `flush()` waits
+   for a save already in flight (and edits made meanwhile) and returns false when it failed; `withSavedProject` makes
+   every server call that acts on the saved project stop on a failed save, and retries once when the server says "no
+   selection" while the page has one (a lost save), instead of surfacing a confusing error.
    The server answers only to `127.0.0.1`/`localhost` Hosts and refuses cross-origin writes (DNS rebinding / CSRF).
 8. **Errors are Thai, with a fix.** Raise `AppError(code, message, hint, details)` or let `from_exception` map core
    exceptions; the UI shows message + hint and folds `details` away.

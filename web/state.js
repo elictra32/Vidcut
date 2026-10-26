@@ -1,4 +1,4 @@
-import { api } from "./api.js";
+import { api, ApiError } from "./api.js";
 import { showError, showToast } from "./toast.js";
 import { remapSelection } from "./timeline_math.js";
 
@@ -7,6 +7,7 @@ let presets = {};
 let fonts = [];
 let saveTimer = null;
 let dirty = false;
+let inflight = null; // the save currently on its way to the server
 const listeners = new Set();
 
 /** Transient UI state (not saved). */
@@ -33,7 +34,7 @@ export function update(mutator, why = "edit") {
   notify(why);
   dirty = true;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(flush, 400);
+  saveTimer = setTimeout(() => flush().catch(() => {}), 400);
 }
 
 /** Change keeps while keeping the selection on the same source content. */
@@ -45,21 +46,68 @@ export function updateKeeps(mutator) {
   }, "keeps");
 }
 
-export async function flush() {
-  clearTimeout(saveTimer);
-  if (!dirty) return;
+/** One PUT of the current project. Resolves true when the server stored it. */
+async function saveOnce() {
   dirty = false;
   try {
     await api("PUT", "/api/project", project);
+    return true;
   } catch (e) {
     if (e.payload?.code === "project_stale") {
       // a background job finished since this page last loaded: take the server's version, never overwrite it
       await loadProject();
       showToast("มีงานเบื้องหลังเพิ่งทำเสร็จ โหลดข้อมูลล่าสุดให้แล้ว การแก้ไขล่าสุดบางส่วนอาจต้องทำซ้ำ", "error", 7000);
-      return;
+      return false;
     }
-    dirty = true;
+    dirty = true; // keep it: the next flush retries
     showError(e);
+    return false;
+  }
+}
+
+/**
+ * Resolve true once the server holds every edit made so far, waiting for a save that is already in
+ * flight and for edits made meanwhile; false when it could not be saved. Anything that asks the server
+ * to act on the project must stop on false, or it would work on stale data.
+ */
+export async function flush() {
+  clearTimeout(saveTimer);
+  for (;;) {
+    if (inflight) {
+      if (!(await inflight)) return false;
+      continue;
+    }
+    if (!dirty) return true;
+    inflight = saveOnce().finally(() => (inflight = null));
+    if (!(await inflight)) return false;
+  }
+}
+
+/** Save again even though nothing looks changed (used when the server turns out to be out of step). */
+export function forceSave() {
+  dirty = true;
+  return flush();
+}
+
+export const saveFailed = () => new ApiError({
+  code: "save_failed", message: "บันทึกการแก้ไขล่าสุดไม่สำเร็จ",
+  hint: "ตรวจว่าหน้าต่างดำของ run.bat ยังเปิดอยู่ แล้วลองอีกครั้ง" }, 0);
+
+/**
+ * Run a server call that acts on the SAVED project (transcribe, export, import...). Saves first; and when
+ * the server says there is no selection although this page has one, a save was lost somewhere: re-send
+ * the project and retry once instead of showing a confusing error.
+ */
+export async function withSavedProject(call) {
+  if (!(await flush())) throw saveFailed();
+  try {
+    return await call();
+  } catch (e) {
+    if (e.payload?.code === "no_selection" && project?.selection) {
+      if (!(await forceSave())) throw saveFailed();
+      return await call();
+    }
+    throw e;
   }
 }
 

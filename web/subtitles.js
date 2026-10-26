@@ -1,6 +1,6 @@
 // Subtitle panel (auto-generate, list, edit text), and the subtitle lane on the edit timeline.
 import { api } from "./api.js";
-import { flush, getProject, loadProject, reloadAfterJob, setSelectedSub, subscribe, ui, update } from "./state.js";
+import { getProject, loadProject, reloadAfterJob, setSelectedSub, subscribe, ui, update, withSavedProject } from "./state.js";
 import { trackJob } from "./status.js";
 import { showError, showToast } from "./toast.js";
 import * as tm from "./timeline_math.js";
@@ -27,8 +27,7 @@ async function generate(model) {
   if (!p.selection) return showToast("ตั้งช่วงที่จะใช้ก่อน (ปุ่ม ตั้ง In / ตั้ง Out) จะได้ถอดเสียงเฉพาะช่วงนั้น", "error", 6000);
   if (p.subtitles.length && !confirm("ซับที่มีอยู่จะถูกแทนที่ด้วยซับที่สร้างใหม่ ทำต่อไหม?")) return;
   try {
-    await flush(); // the server transcribes its saved copy of the project
-    const { job } = await api("POST", "/api/transcribe", { model });
+    const { job } = await withSavedProject(() => api("POST", "/api/transcribe", { model })); // the server uses its saved copy
     const done = await trackJob("กำลังถอดเสียง (อาจใช้เวลาหลายนาทีบน CPU)", job);
     if (!done) return;
     await reloadAfterJob();
@@ -60,9 +59,8 @@ function openImportDialog(fileName, srtText) {
         if (getProject().subtitles.some((x) => x.clip_id === clipId) && !confirm("ซับเดิมของคลิปนี้จะถูกแทนที่ ทำต่อไหม?")) return;
         dlg.close();
         try {
-          await flush(); // the server converts against its saved copy (selection, keeps)
-          const r = await api("POST", "/api/subtitles/import-srt", {
-            clip_id: clipId, srt_text: srtText, offset: parseFloat(offset.value) || 0, only_selection: onlySel.checked });
+          const r = await withSavedProject(() => api("POST", "/api/subtitles/import-srt", {
+            clip_id: clipId, srt_text: srtText, offset: parseFloat(offset.value) || 0, only_selection: onlySel.checked }));
           await loadProject();
           showToast(`นำเข้าซับแล้ว ${r.count} บรรทัด`);
         } catch (e) {

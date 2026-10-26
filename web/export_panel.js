@@ -1,5 +1,5 @@
 import { api, ApiError } from "./api.js";
-import { flush, getPresets, getProject, setUi, subscribe, ui, update } from "./state.js";
+import { flush, getPresets, getProject, saveFailed, setUi, subscribe, ui, update, withSavedProject } from "./state.js";
 import { trackJob } from "./status.js";
 import { showError } from "./toast.js";
 import * as tm from "./timeline_math.js";
@@ -21,7 +21,7 @@ function setPreset(key) {
 
 async function checkFrame() {
   try {
-    await flush();
+    if (!(await flush())) throw saveFailed();
     const res = await fetch("/api/preview-frame", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ t: player.getTime() }) });
     if (!res.ok) {
@@ -91,7 +91,7 @@ export function initExportPanel() {
     estimateTimer = setTimeout(async () => {
       const seq = ++estimateSeq;
       try {
-        await flush(); // the server estimates from its saved copy
+        if (!(await flush())) return; // the server estimates from its saved copy
         const r = await api("POST", "/api/export/estimate");
         if (seq !== estimateSeq) return;
         const mb = r.bytes / 1048576;
@@ -112,8 +112,7 @@ export function initExportPanel() {
     exportBtn.disabled = true;
     result.replaceChildren();
     try {
-      await flush();
-      const { job } = await api("POST", "/api/export", { preset: p.preset });
+      const { job } = await withSavedProject(() => api("POST", "/api/export", { preset: p.preset }));
       const done = await trackJob("กำลังส่งออกวิดีโอ", job);
       if (!done) return;
       const { video, srt, dir, downloadable } = done.result;
