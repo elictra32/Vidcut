@@ -76,7 +76,7 @@ input, select {
 #frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; }
 /* the second <video> pre-seeks the next kept segment while the first plays; they swap at the cut */
 #frame video.standby { opacity: 0; pointer-events: none; z-index: 0; }
-#sub-overlay { position: absolute; inset: 0; pointer-events: none; }
+#sub-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 3; } /* above both videos (z-index 0/1) and the safe-zone guide (2) */
 .sub { position: absolute; transform: translate(-50%, -50%); white-space: pre; text-align: center; line-height: 1.25;
   pointer-events: auto; cursor: move; touch-action: none; user-select: none; border-radius: 4px; }
 .sub.selected { outline: 1px dashed var(--accent); outline-offset: 4px; }
@@ -118,7 +118,7 @@ textarea { font: inherit; color: var(--text); background: var(--panel-2); border
 .sub-row .small { grid-column: 2 / -1; }
 .sub-row.hidden-sub textarea { opacity: 0.55; }
 
-#safe-zone { position: absolute; display: none; pointer-events: none; border: 1px dashed rgba(255, 255, 255, 0.35); }
+#safe-zone { position: absolute; display: none; pointer-events: none; border: 1px dashed rgba(255, 255, 255, 0.35); z-index: 2; }
 h3 { font-size: 12px; margin: 10px 0 6px; color: var(--muted); font-weight: 600; }
 .seg { display: grid; grid-auto-flow: column; gap: 4px; margin-bottom: 10px; }
 .seg button { border-radius: 6px; }

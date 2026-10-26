@@ -66,6 +66,8 @@ try {
     "2\r\n00:00:04,500 --> 00:00:08,000\r\nเออ\r\n\r\n3\r\n00:00:08,000 --> 00:00:12,000\r\n[เสียงหัวเราะ]ข้อความที่สอง\r\n", "utf-8");
   await page.setInputFiles("#srt-file", srtPath);
   await page.waitForSelector("dialog[open]");
+  const offsetHelp = await page.$eval("dialog[open]", (d) => d.textContent);
+  must(/ค่าบวก = ซับขึ้นช้าลง/.test(offsetHelp) && /ค่าลบ = ซับขึ้นเร็วขึ้น/.test(offsetHelp), "the time-shift field says which direction a positive/negative value moves the subtitles");
   const onlySelection = page.locator("dialog[open] input[type=checkbox]");
   if (await onlySelection.isChecked()) await onlySelection.uncheck();
   await page.click("dialog[open] button.primary"); // replaces the existing subtitles; the confirm() is auto-accepted

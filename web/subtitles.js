@@ -51,7 +51,7 @@ function openImportDialog(fileName, srtText) {
     el("p", { class: "muted small" }, "ไฟล์ SRT ต้องมาจากวิดีโอไฟล์เดียวกับที่ใส่ในโปรแกรม (ไฟล์ต้นฉบับก่อนตัด Dead air) เวลาจึงจะตรงกัน"),
     el("label", { class: "field" }, el("span", {}, "ใส่ซับให้กับคลิป"), clipSel),
     el("label", { class: "field inline" }, el("span", {}, p.selection ? "เฉพาะช่วง In/Out ที่เลือก" : "เฉพาะช่วง In/Out (ยังไม่ได้เลือกช่วง)"), onlySel),
-    el("label", { class: "field" }, el("span", {}, "เลื่อนเวลา (วินาที) ใส่ค่าบวกถ้าซับมาช้าไป"), offset),
+    el("label", { class: "field" }, el("span", {}, "เลื่อนเวลา (วินาที): ค่าบวก = ซับขึ้นช้าลง ใช้เมื่อซับขึ้นเร็วกว่าเสียง · ค่าลบ = ซับขึ้นเร็วขึ้น ใช้เมื่อซับขึ้นช้ากว่าเสียง"), offset),
     el("div", { class: "row" },
       el("button", { onclick: () => dlg.close() }, "ยกเลิก"),
       el("button", { class: "primary", onclick: async () => {
