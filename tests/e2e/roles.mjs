@@ -29,7 +29,7 @@ try {
 
   await page.keyboard.press("i"); // selection from the playhead (0) to the end of the main timeline
   await sleep(500);
-  await page.click("text=ส่งออกวิดีโอ");
+  await page.click("text=Export video");
   await page.waitForSelector(".export-result a", { timeout: 120000 });
   const dir = join(app.home, "exports");
   const file = readdirSync(dir).find((f) => f.endsWith(".mp4"));

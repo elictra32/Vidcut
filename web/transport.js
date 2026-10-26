@@ -24,15 +24,15 @@ export const clearSelection = () => update((p) => (p.selection = null), "selecti
 
 export function initTransport() {
   const root = $("#transport");
-  const playBtn = el("button", { class: "primary", title: "เล่น/หยุด (Space)", onclick: () => player.toggle() }, "▶ เล่น");
+  const playBtn = el("button", { class: "primary", title: "Play/Pause (Space)", onclick: () => player.toggle() }, "▶ Play");
   const clock = el("span", { class: "clock" }, "0:00.0 / 0:00.0");
   const selInfo = el("span", { class: "sel-info" });
   root.replaceChildren(
     playBtn, clock,
-    el("button", { title: "ตั้งจุดเริ่ม (I)", onclick: () => setIn(player.getTime()) }, "ตั้ง In"),
-    el("button", { title: "ตั้งจุดจบ (O)", onclick: () => setOut(player.getTime()) }, "ตั้ง Out"),
-    el("button", { onclick: () => player.playSelection() }, "เล่นช่วงที่เลือก"),
-    el("button", { class: "ghost", onclick: clearSelection }, "ล้างช่วง"),
+    el("button", { title: "Set start (I)", onclick: () => setIn(player.getTime()) }, "Set In"),
+    el("button", { title: "Set end (O)", onclick: () => setOut(player.getTime()) }, "Set Out"),
+    el("button", { onclick: () => player.playSelection() }, "Play selection"),
+    el("button", { class: "ghost", onclick: clearSelection }, "Clear selection"),
     selInfo,
   );
 
@@ -40,9 +40,9 @@ export function initTransport() {
     const p = getProject();
     const total = p ? tm.editedDuration(p.clips) : 0;
     clock.textContent = `${fmtTime(player.getTime())} / ${fmtTime(total)}`;
-    playBtn.textContent = player.isPlaying() ? "⏸ หยุด" : "▶ เล่น";
+    playBtn.textContent = player.isPlaying() ? "⏸ Pause" : "▶ Play";
     const s = p?.selection;
-    selInfo.textContent = s ? `ช่วงที่เลือก ${fmtTime(s.start)} – ${fmtTime(s.end)} (${(s.end - s.start).toFixed(1)} วินาที)` : "ยังไม่ได้เลือกช่วง";
+    selInfo.textContent = s ? `Selection ${fmtTime(s.start)} – ${fmtTime(s.end)} (${(s.end - s.start).toFixed(1)} s)` : "No selection";
   };
   player.onTime(refresh);
   subscribe(refresh);

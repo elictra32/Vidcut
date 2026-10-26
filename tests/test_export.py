@@ -111,7 +111,7 @@ def test_export_invalid_selection_raises_ExportError_th(tmp_path, sel):
     with pytest.raises(ExportError) as ei:
         run_export(real_project(p, sel=sel), str(tmp_path / "out"))
     assert ei.value.code == "selection_invalid"
-    assert any("฀" <= ch <= "๿" for ch in ei.value.message_th)
+    assert ei.value.message_th and ei.value.message_th.isascii()
 
 
 def test_export_all_keeps_disabled_raises_ExportError(tmp_path):

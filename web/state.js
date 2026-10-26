@@ -56,7 +56,7 @@ async function saveOnce() {
     if (e.payload?.code === "project_stale") {
       // a background job finished since this page last loaded: take the server's version, never overwrite it
       await loadProject();
-      showToast("มีงานเบื้องหลังเพิ่งทำเสร็จ โหลดข้อมูลล่าสุดให้แล้ว การแก้ไขล่าสุดบางส่วนอาจต้องทำซ้ำ", "error", 7000);
+      showToast("A background job just finished and the latest data was reloaded. You may need to redo your most recent edit", "error", 7000);
       return false;
     }
     dirty = true; // keep it: the next flush retries
@@ -90,8 +90,8 @@ export function forceSave() {
 }
 
 export const saveFailed = () => new ApiError({
-  code: "save_failed", message: "บันทึกการแก้ไขล่าสุดไม่สำเร็จ",
-  hint: "ตรวจว่าหน้าต่างดำของ run.bat ยังเปิดอยู่ แล้วลองอีกครั้ง" }, 0);
+  code: "save_failed", message: "Couldn't save your latest edit",
+  hint: "Check that the black run.bat window is still open, then try again" }, 0);
 
 /**
  * Run a server call that acts on the SAVED project (transcribe, export, import...). Saves first; and when

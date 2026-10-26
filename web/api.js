@@ -15,8 +15,8 @@ export async function api(method, url, body) {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
-    throw new ApiError({ code: "network", message: "เชื่อมต่อกับโปรแกรมไม่ได้",
-      hint: "ตรวจว่าหน้าต่าง run.bat ยังเปิดอยู่ แล้วรีเฟรชหน้านี้" }, 0);
+    throw new ApiError({ code: "network", message: "Can't reach the app",
+      hint: "Check that the run.bat window is still open, then refresh this page" }, 0);
   }
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(data?.error ?? { code: "http", message: `HTTP ${res.status}` }, res.status);

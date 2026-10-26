@@ -10,13 +10,13 @@ export async function trackJob(label, jobId) {
   const bar = $("#status");
   const text = el("span", {}, label);
   const prog = el("progress", { max: 1, value: 0 });
-  const cancel = el("button", { class: "ghost", onclick: () => api("POST", `/api/jobs/${jobId}/cancel`) }, "ยกเลิก");
+  const cancel = el("button", { class: "ghost", onclick: () => api("POST", `/api/jobs/${jobId}/cancel`) }, "Cancel");
   bar.replaceChildren(text, prog, cancel);
   bar.hidden = false;
   try {
     const job = await followJob(jobId, (j) => {
       prog.value = j.percent;
-      text.textContent = j.state === "queued" ? `${label} · รอคิวงานก่อนหน้า`
+      text.textContent = j.state === "queued" ? `${label} · waiting for the previous job`
         : j.message ? `${label} · ${j.message}` : `${label} ${Math.round(j.percent * 100)}%`;
     });
     if (job.state === "error") {

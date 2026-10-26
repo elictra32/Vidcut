@@ -52,7 +52,7 @@ const draw = rafThrottle(() => {
   if (!c) {
     ctx.fillStyle = cssVar("--muted");
     ctx.font = "14px system-ui, sans-serif";
-    ctx.fillText("ยังไม่มีคลิป", 16, h / 2);
+    ctx.fillText("No clips yet", 16, h / 2);
     return;
   }
   if (viewClipId !== c.id) fit();
@@ -111,10 +111,10 @@ function toggleAt(t) {
 export function initCutStrip() {
   const wrap = $("#cut-strip-wrap");
   canvas = el("canvas", { class: "timeline-canvas", height: 110 });
-  hint = el("span", { class: "muted" }, "คลิกช่วงสีเขียวเพื่อตัดออก · คลิกช่วงสีแดงเพื่อเอากลับมา · เลื่อนล้อเมาส์เพื่อซูม ลากเพื่อเลื่อน");
+  hint = el("span", { class: "muted" }, "Click a green section to cut it · click a red one to bring it back · mouse wheel to zoom, drag to pan");
   wrap.replaceChildren(
-    el("div", { class: "tl-bar" }, el("strong", {}, "ตรวจช่วงที่ตัด (เวลาในไฟล์ต้นฉบับ)"), el("span", { class: "spacer" }), hint,
-      el("button", { class: "ghost", onclick: () => (fit(), draw()) }, "ทั้งคลิป")),
+    el("div", { class: "tl-bar" }, el("strong", {}, "Review cuts (time in the original file)"), el("span", { class: "spacer" }), hint,
+      el("button", { class: "ghost", onclick: () => (fit(), draw()) }, "Whole clip")),
     canvas);
 
   canvas.addEventListener("pointerdown", (e) => {

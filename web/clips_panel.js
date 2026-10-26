@@ -12,7 +12,7 @@ async function afterAdd(res) {
   setCurrentClip(res.clip.id);
   if (res.job) {
     // non-browser-playable source: wait for the preview copy before showing it
-    await trackJob("กำลังสร้างไฟล์พรีวิว", res.job);
+    await trackJob("Building preview file", res.job);
     await reloadAfterJob();
   }
   await player.showClip(res.clip.id);
@@ -35,7 +35,7 @@ export async function addClipFromPath(path) {
   }
 }
 
-const ROLE_LABELS = { main: "คลิปหลัก", intro: "ปกหัว", outro: "ปกท้าย" };
+const ROLE_LABELS = { main: "Main clip", intro: "Intro", outro: "Outro" };
 
 /** Intro/outro clips leave the edit timeline (so the In/Out selection stays on the main clip). */
 function setRole(id, role) {
@@ -55,7 +55,7 @@ function removeClip(id) {
 async function clearTemp() {
   try {
     const { freed_bytes } = await api("POST", "/api/clear-temp");
-    showToast(`ล้างไฟล์ชั่วคราวแล้ว (คืนพื้นที่ ${(freed_bytes / 1048576).toFixed(1)} MB)`);
+    showToast(`Temporary files cleared (freed ${(freed_bytes / 1048576).toFixed(1)} MB)`);
   } catch (e) {
     showError(e);
   }
@@ -70,15 +70,15 @@ export function initClipsPanel() {
       list.append(el("li", { class: c.id === ui.currentClipId ? "active" : "" },
         el("button", { class: "clip-main", onclick: () => (setCurrentClip(c.id), player.showClip(c.id)) },
           el("span", { class: "clip-name", title: c.path }, basename(c.path)),
-          el("span", { class: "muted" }, `${fmtTime(c.duration)} · ${c.width}×${c.height}${c.has_audio ? "" : " · ไม่มีเสียง"}`)),
-        el("select", { class: "role", "aria-label": "บทบาทของคลิป", title: "ปกหัว/ปกท้ายจะถูกต่อหน้า/หลังช่วงที่เลือกตอนส่งออก",
+          el("span", { class: "muted" }, `${fmtTime(c.duration)} · ${c.width}×${c.height}${c.has_audio ? "" : " · no audio"}`)),
+        el("select", { class: "role", "aria-label": "Clip role", title: "Intro/outro clips are joined before/after the selection on export",
           onchange: (e) => setRole(c.id, e.target.value) },
           Object.entries(ROLE_LABELS).map(([v, label]) => el("option", { value: v, selected: (c.role ?? "main") === v }, label))),
-        el("button", { class: "ghost icon", title: "เอาคลิปออกจากโปรเจกต์ (ไม่ลบไฟล์)", onclick: () => removeClip(c.id) }, "✕")));
+        el("button", { class: "ghost icon", title: "Remove clip from the project (the file is not deleted)", onclick: () => removeClip(c.id) }, "✕")));
     }
-    root.replaceChildren(el("h2", {}, "คลิป"),
-      p?.clips.length ? list : el("p", { class: "muted" }, "ยังไม่มีคลิป กด “เพิ่มคลิป” ด้านบน"),
-      el("button", { class: "ghost small", title: "ลบไฟล์พรีวิวที่ไม่ได้ใช้และโฟลเดอร์ชั่วคราว (ไม่แตะไฟล์ต้นฉบับ)", onclick: clearTemp }, "ล้างไฟล์ชั่วคราว"));
+    root.replaceChildren(el("h2", {}, "Clips"),
+      p?.clips.length ? list : el("p", { class: "muted" }, "No clips yet. Click “Add clip” above"),
+      el("button", { class: "ghost small", title: "Delete unused preview files and temp folders (originals are never touched)", onclick: clearTemp }, "Clear temp files"));
   };
   subscribe(render);
   render();

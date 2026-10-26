@@ -30,9 +30,9 @@ async function checkFrame() {
     }
     const url = URL.createObjectURL(await res.blob());
     const dlg = el("dialog", { class: "frame-dialog" },
-      el("p", { class: "muted small" }, "ภาพนี้สร้างจากกระบวนการส่งออกจริง (กรอบภาพ + ซับ ณ ตำแหน่งที่เล่นอยู่)"),
-      el("img", { src: url, alt: "เฟรมตัวอย่างจากไฟล์ที่จะส่งออก" }),
-      el("button", { class: "primary", onclick: () => dlg.close() }, "ปิด"));
+      el("p", { class: "muted small" }, "This image comes from the real export pipeline (framing + subtitles at the playhead)"),
+      el("img", { src: url, alt: "Sample frame from the file to be exported" }),
+      el("button", { class: "primary", onclick: () => dlg.close() }, "Close"));
     dlg.addEventListener("close", () => (URL.revokeObjectURL(url), dlg.remove()));
     document.body.append(dlg);
     dlg.showModal();
@@ -45,20 +45,20 @@ export function initExportPanel() {
   const root = $("#export-panel");
   const result = el("div", { class: "export-result" });
   const framing = el("div", {});
-  const seg = el("div", { class: "seg", role: "group", "aria-label": "เลือกแพลตฟอร์ม" });
+  const seg = el("div", { class: "seg", role: "group", "aria-label": "Choose platform" });
   const safe = el("input", { type: "checkbox", checked: true });
   safe.addEventListener("change", () => setUi({ showSafeZone: safe.checked }, "safezone"));
-  const exportBtn = el("button", { class: "primary" }, "ส่งออกวิดีโอ");
+  const exportBtn = el("button", { class: "primary" }, "Export video");
 
   // ---- file format, quality / target size, folder, and a size estimate ----
   const setExport = (patch) => update((p) => Object.assign(p.export, patch), "export");
   const option = (value, label) => el("option", { value }, label);
   const container = el("select", { id: "opt-container" },
-    option("mp4", "MP4 (เปิดได้ทุกที่ แนะนำ)"), option("mov", "MOV"), option("mkv", "MKV"), option("webm", "WebM (เข้ารหัสช้ากว่า)"));
+    option("mp4", "MP4 (plays everywhere, recommended)"), option("mov", "MOV"), option("mkv", "MKV"), option("webm", "WebM (slower to encode)"));
   const quality = el("select", { id: "opt-quality" },
-    option("high", "คุณภาพสูง (ไฟล์ใหญ่)"), option("medium", "คุณภาพกลาง"), option("small", "ไฟล์เล็ก"), option("custom", "กำหนดขนาดเอง"));
+    option("high", "High quality (large file)"), option("medium", "Medium quality"), option("small", "Small file"), option("custom", "Custom size"));
   const target = el("input", { type: "number", id: "opt-target", min: 1, step: 1 });
-  const targetRow = el("label", { class: "field" }, el("span", {}, "ขนาดไฟล์เป้าหมาย (MB)"), target);
+  const targetRow = el("label", { class: "field" }, el("span", {}, "Target file size (MB)"), target);
   const folderText = el("span", { class: "folder-text small" });
   const estimate = el("p", { id: "estimate", class: "estimate small" });
   container.addEventListener("change", () => setExport({ container: container.value }));
@@ -72,10 +72,10 @@ export function initExportPanel() {
       showError(e);
     }
   };
-  const folderRow = el("div", { class: "field" }, el("span", {}, "บันทึกไฟล์ที่"), folderText,
+  const folderRow = el("div", { class: "field" }, el("span", {}, "Save to"), folderText,
     el("div", { class: "row" },
-      el("button", { id: "opt-folder-pick", onclick: () => setFolder(() => api("POST", "/api/export-folder/pick")) }, "เลือกโฟลเดอร์…"),
-      el("button", { class: "ghost", onclick: () => setFolder(() => api("POST", "/api/export-folder", { path: "" })) }, "ใช้โฟลเดอร์เริ่มต้น")));
+      el("button", { id: "opt-folder-pick", onclick: () => setFolder(() => api("POST", "/api/export-folder/pick")) }, "Choose folder…"),
+      el("button", { class: "ghost", onclick: () => setFolder(() => api("POST", "/api/export-folder", { path: "" })) }, "Use default folder")));
 
   let lastSig = "", estimateSeq = 0, estimateTimer = null;
   const extrasSeconds = (p, role) => p.clips.filter((c) => c.role === role)
@@ -95,11 +95,11 @@ export function initExportPanel() {
         const r = await api("POST", "/api/export/estimate");
         if (seq !== estimateSeq) return;
         const mb = r.bytes / 1048576;
-        const parts = [extrasSeconds(p, "intro") && `ปกหัว ${fmtTime(extrasSeconds(p, "intro"))}`, `เนื้อหา ${fmtTime(p.selection ? p.selection.end - p.selection.start : tm.editedDuration(p.clips))}`,
-          extrasSeconds(p, "outro") && `ปกท้าย ${fmtTime(extrasSeconds(p, "outro"))}`].filter(Boolean).join(" + ");
-        estimate.textContent = `ความยาวไฟล์ ${fmtTime(r.seconds)} (${parts}) · ขนาดประมาณ ${mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)} MB (±15%) · วิดีโอ ${(r.video_kbps / 1000).toFixed(1)} Mbps`;
+        const parts = [extrasSeconds(p, "intro") && `Intro ${fmtTime(extrasSeconds(p, "intro"))}`, `Content ${fmtTime(p.selection ? p.selection.end - p.selection.start : tm.editedDuration(p.clips))}`,
+          extrasSeconds(p, "outro") && `Outro ${fmtTime(extrasSeconds(p, "outro"))}`].filter(Boolean).join(" + ");
+        estimate.textContent = `Length ${fmtTime(r.seconds)} (${parts}) · approx. size ${mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)} MB (±15%) · video ${(r.video_kbps / 1000).toFixed(1)} Mbps`;
       } catch (e) {
-        if (seq === estimateSeq) estimate.textContent = e.payload?.code === "selection_invalid" ? "ยังประเมินขนาดไม่ได้: ช่วงที่เลือกไม่ถูกต้อง" : "";
+        if (seq === estimateSeq) estimate.textContent = e.payload?.code === "selection_invalid" ? "Can't estimate size: the selection is invalid" : "";
       }
     }, 350);
   };
@@ -107,19 +107,19 @@ export function initExportPanel() {
   exportBtn.addEventListener("click", async () => {
     const p = getProject();
     const total = tm.editedDuration(p.clips);
-    if (!total) return showError({ payload: { message: "ยังไม่มีช่วงที่เก็บไว้ให้ส่งออก", hint: "เพิ่มคลิป หรือเปิดช่วงที่ถูกตัดกลับมา" } });
-    if (!p.selection && !confirm(`ยังไม่ได้เลือกช่วง In/Out จะส่งออกทั้งไทม์ไลน์ (${fmtTime(total)}) ซึ่งอาจใช้เวลานาน ทำต่อไหม?`)) return;
+    if (!total) return showError({ payload: { message: "Nothing to export", hint: "Add a clip or re-enable some cut sections" } });
+    if (!p.selection && !confirm(`No In/Out selected, so the whole timeline (${fmtTime(total)}) will be exported, which may take a long time. Continue?`)) return;
     exportBtn.disabled = true;
     result.replaceChildren();
     try {
       const { job } = await withSavedProject(() => api("POST", "/api/export", { preset: p.preset }));
-      const done = await trackJob("กำลังส่งออกวิดีโอ", job);
+      const done = await trackJob("Exporting video", job);
       if (!done) return;
       const { video, srt, dir, downloadable } = done.result;
       const link = (name, label) => el("a", { href: `/exports/${encodeURIComponent(name)}`, download: name }, label);
-      result.replaceChildren(el("strong", {}, "ส่งออกสำเร็จ"),
-        downloadable ? el("div", { class: "row" }, link(video, `ดาวน์โหลด .${video.split(".").pop()}`), link(srt, "ดาวน์โหลด .srt")) : "",
-        el("p", { class: "muted small" }, `ไฟล์ ${video} อยู่ที่โฟลเดอร์: ${dir}`));
+      result.replaceChildren(el("strong", {}, "Export finished"),
+        downloadable ? el("div", { class: "row" }, link(video, `Download .${video.split(".").pop()}`), link(srt, "Download .srt")) : "",
+        el("p", { class: "muted small" }, `File ${video} is in folder: ${dir}`));
     } catch (e) {
       showError(e);
     } finally {
@@ -127,11 +127,11 @@ export function initExportPanel() {
     }
   });
 
-  root.replaceChildren(el("h2", {}, "ส่งออก"), seg, framing,
-    el("label", { class: "field" }, el("span", {}, "ชนิดไฟล์"), container),
-    el("label", { class: "field" }, el("span", {}, "คุณภาพ / ขนาด"), quality), targetRow, folderRow, estimate,
-    el("label", { class: "field inline" }, el("span", {}, "แสดงเส้นกันชนปุ่มของแอป"), safe),
-    el("div", { class: "row" }, el("button", { onclick: checkFrame }, "ตรวจเฟรมจริง"), exportBtn), result);
+  root.replaceChildren(el("h2", {}, "Export"), seg, framing,
+    el("label", { class: "field" }, el("span", {}, "File type"), container),
+    el("label", { class: "field" }, el("span", {}, "Quality / size"), quality), targetRow, folderRow, estimate,
+    el("label", { class: "field inline" }, el("span", {}, "Show app UI safe zone"), safe),
+    el("div", { class: "row" }, el("button", { onclick: checkFrame }, "Check real frame"), exportBtn), result);
 
   const render = () => {
     const p = getProject();
@@ -141,7 +141,7 @@ export function initExportPanel() {
     quality.value = p.export.quality;
     targetRow.hidden = p.export.quality !== "custom";
     if (document.activeElement !== target) target.value = p.export.target_mb ?? "";
-    folderText.textContent = p.export.out_dir || "โฟลเดอร์เริ่มต้นของโปรแกรม (VidcutProjects\\default\\exports)";
+    folderText.textContent = p.export.out_dir || "App default folder (VidcutProjects\\default\\exports)";
     refreshEstimate();
     seg.replaceChildren(...Object.keys(presets).map((k) =>
       el("button", { "aria-pressed": String(p.preset === k), onclick: () => p.preset !== k && setPreset(k) }, LABELS[k] ?? k)));
@@ -150,7 +150,7 @@ export function initExportPanel() {
     framing.replaceChildren();
     if (!clip) return;
     if (Math.abs(clip.width / clip.height - pr.width / pr.height) < 0.01) {
-      framing.append(el("p", { class: "muted small" }, "สัดส่วนของคลิปตรงกับ preset นี้ ไม่ต้องปรับกรอบภาพ"));
+      framing.append(el("p", { class: "muted small" }, "The clip's aspect ratio already matches this preset; no framing needed"));
       return;
     }
     const setMode = (mode) => update(() => (clip.framing.mode = mode), "framing");
@@ -159,13 +159,13 @@ export function initExportPanel() {
       r.addEventListener("change", () => setMode(mode));
       return el("label", { class: "field inline" }, r, el("span", {}, label));
     };
-    framing.append(el("h3", {}, "กรอบภาพของคลิปนี้"),
-      radio("blur_fit", "เต็มภาพ + พื้นหลังเบลอ"), radio("crop", "ครอปเต็มจอ"));
+    framing.append(el("h3", {}, "Framing for this clip"),
+      radio("blur_fit", "Full frame + blurred background"), radio("crop", "Crop to fill"));
     if (clip.framing.mode === "crop" && clip.width / clip.height > pr.width / pr.height) {
       const s = el("input", { type: "range", min: 0, max: 1, step: 0.01, value: clip.framing.crop_center_x });
       s.addEventListener("input", () => update(() => (clip.framing.crop_center_x = parseFloat(s.value)), "framing-x"));
-      framing.append(el("label", { class: "field" }, el("span", {}, "ส่วนของภาพที่เก็บ (ซ้าย–ขวา)"), s),
-        el("p", { class: "muted small" }, "หรือลากบนภาพตัวอย่างเพื่อเลื่อนกรอบ"));
+      framing.append(el("label", { class: "field" }, el("span", {}, "Part of the image to keep (left–right)"), s),
+        el("p", { class: "muted small" }, "Or drag on the preview to move the frame"));
     }
   };
   // "framing-x" fires while dragging the slider; re-rendering then would drop the slider mid-drag

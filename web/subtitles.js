@@ -9,9 +9,9 @@ import { LANE_TOP, setSubtitleLane, timeAtX } from "./timeline_view.js";
 import { $, basename, cssVar, el, fmtTime } from "./util.js";
 
 const MODELS = {
-  "large-v3": "แม่นที่สุด · ครั้งแรกต้องดาวน์โหลดราว 3 GB · ช้าสุดบน CPU",
-  medium: "สมดุล · ครั้งแรกดาวน์โหลดราว 1.5 GB",
-  small: "เร็วที่สุด · ดาวน์โหลดราว 500 MB · แม่นน้อยกว่า",
+  "large-v3": "Most accurate · first use downloads about 3 GB · slowest on CPU",
+  medium: "Balanced · first use downloads about 1.5 GB",
+  small: "Fastest · about 500 MB download · less accurate",
 };
 const spanOf = (s) => tm.subtitleEditedSpan(getProject().clips, s);
 
@@ -24,15 +24,15 @@ function recall(key, fallback) {
 
 async function generate(model) {
   const p = getProject();
-  if (!p.selection) return showToast("ตั้งช่วงที่จะใช้ก่อน (ปุ่ม ตั้ง In / ตั้ง Out) จะได้ถอดเสียงเฉพาะช่วงนั้น", "error", 6000);
-  if (p.subtitles.length && !confirm("ซับที่มีอยู่จะถูกแทนที่ด้วยซับที่สร้างใหม่ ทำต่อไหม?")) return;
+  if (!p.selection) return showToast("Set the range first (Set In / Set Out buttons) so only that range is transcribed", "error", 6000);
+  if (p.subtitles.length && !confirm("Existing subtitles will be replaced by the new ones. Continue?")) return;
   try {
     const { job } = await withSavedProject(() => api("POST", "/api/transcribe", { model })); // the server uses its saved copy
-    const done = await trackJob("กำลังถอดเสียง (อาจใช้เวลาหลายนาทีบน CPU)", job);
+    const done = await trackJob("Transcribing (can take several minutes on CPU)", job);
     if (!done) return;
     await reloadAfterJob();
-    if (done.result.empty) showToast("ไม่พบเสียงพูดในช่วงที่เลือก ลองเลือกช่วงอื่น หรือกด “+ เพิ่มซับ” เพื่อพิมพ์เอง", "error", 7000);
-    else showToast(`สร้างซับแล้ว ${done.result.count} บรรทัด`);
+    if (done.result.empty) showToast("No speech found in the selection. Try another range, or click “+ Add subtitle” to type one", "error", 7000);
+    else showToast(`Created ${done.result.count} subtitle lines`);
   } catch (e) {
     showError(e);
   }
@@ -41,32 +41,32 @@ async function generate(model) {
 /** Import an .srt (e.g. YouTube auto captions). Times are source times of the SAME uncut video. */
 function openImportDialog(fileName, srtText) {
   const p = getProject();
-  if (!p.clips.length) return showToast("เพิ่มคลิปก่อน แล้วค่อยนำเข้าซับ", "error");
+  if (!p.clips.length) return showToast("Add a clip first, then import subtitles", "error");
   const clipSel = el("select", {}, p.clips.map((c) => el("option", { value: c.id }, basename(c.path))));
   clipSel.value = p.clips.some((c) => c.id === ui.currentClipId) ? ui.currentClipId : p.clips[0].id;
   const onlySel = el("input", { type: "checkbox", checked: !!p.selection, disabled: !p.selection });
   const offset = el("input", { type: "number", value: 0, step: 0.1 });
   const dlg = el("dialog", { class: "frame-dialog import-dialog" },
-    el("h3", {}, `นำเข้าซับจาก ${fileName}`),
-    el("p", { class: "muted small" }, "ไฟล์ SRT ต้องมาจากวิดีโอไฟล์เดียวกับที่ใส่ในโปรแกรม (ไฟล์ต้นฉบับก่อนตัด Dead air) เวลาจึงจะตรงกัน"),
-    el("label", { class: "field" }, el("span", {}, "ใส่ซับให้กับคลิป"), clipSel),
-    el("label", { class: "field inline" }, el("span", {}, p.selection ? "เฉพาะช่วง In/Out ที่เลือก" : "เฉพาะช่วง In/Out (ยังไม่ได้เลือกช่วง)"), onlySel),
-    el("label", { class: "field" }, el("span", {}, "เลื่อนเวลา (วินาที): ค่าบวก = ซับขึ้นช้าลง ใช้เมื่อซับขึ้นเร็วกว่าเสียง · ค่าลบ = ซับขึ้นเร็วขึ้น ใช้เมื่อซับขึ้นช้ากว่าเสียง"), offset),
+    el("h3", {}, `Import subtitles from ${fileName}`),
+    el("p", { class: "muted small" }, "The SRT must come from the same video you added here (the original, before dead air was cut) for the times to match"),
+    el("label", { class: "field" }, el("span", {}, "Apply subtitles to clip"), clipSel),
+    el("label", { class: "field inline" }, el("span", {}, p.selection ? "Only the selected In/Out range" : "Only the In/Out range (none selected)"), onlySel),
+    el("label", { class: "field" }, el("span", {}, "Time shift (seconds): positive = subtitles appear later (use when they show before the voice) · negative = earlier (use when they show after the voice)"), offset),
     el("div", { class: "row" },
-      el("button", { onclick: () => dlg.close() }, "ยกเลิก"),
+      el("button", { onclick: () => dlg.close() }, "Cancel"),
       el("button", { class: "primary", onclick: async () => {
         const clipId = clipSel.value;
-        if (getProject().subtitles.some((x) => x.clip_id === clipId) && !confirm("ซับเดิมของคลิปนี้จะถูกแทนที่ ทำต่อไหม?")) return;
+        if (getProject().subtitles.some((x) => x.clip_id === clipId) && !confirm("This clip's existing subtitles will be replaced. Continue?")) return;
         dlg.close();
         try {
           const r = await withSavedProject(() => api("POST", "/api/subtitles/import-srt", {
             clip_id: clipId, srt_text: srtText, offset: parseFloat(offset.value) || 0, only_selection: onlySel.checked }));
           await loadProject();
-          showToast(`นำเข้าซับแล้ว ${r.count} บรรทัด`);
+          showToast(`Imported ${r.count} subtitle lines`);
         } catch (e) {
           showError(e);
         }
-      } }, "นำเข้า")));
+      } }, "Import")));
   dlg.addEventListener("close", () => dlg.remove());
   document.body.append(dlg);
   dlg.showModal();
@@ -75,13 +75,13 @@ function openImportDialog(fileName, srtText) {
 function addBlank() {
   const p = getProject();
   const hit = tm.editedToSource(p.clips, player.getTime());
-  if (!hit) return showToast("เพิ่มคลิปและเปิดช่วงที่เก็บไว้ก่อน", "error");
+  if (!hit) return showToast("Add a clip and keep at least one section first", "error");
   const [clipId, t] = hit;
   const keeps = tm.enabledKeeps(p.clips.find((c) => c.id === clipId));
   const keepEnd = keeps.find((k) => t >= k.start && t <= k.end)?.end ?? t + 2;
   const id = crypto.randomUUID().replaceAll("-", "");
   update((q) => q.subtitles.push({ id, clip_id: clipId, src_start: t, src_end: Math.min(t + 2, Math.max(keepEnd, t + 0.5)),
-    text: "พิมพ์ข้อความ", x: null, y: null }), "subs");
+    text: "Type text", x: null, y: null }), "subs");
   setSelectedSub(id);
 }
 
@@ -99,13 +99,13 @@ export function initSubtitles() {
     if (file) openImportDialog(file.name, await file.text());
   });
   root.replaceChildren(
-    el("h2", {}, "ซับไตเติล"),
-    el("label", { class: "field" }, el("span", {}, "โมเดลถอดเสียง"), model), note,
+    el("h2", {}, "Subtitles"),
+    el("label", { class: "field" }, el("span", {}, "Transcription model"), model), note,
     el("div", { class: "row" },
-      el("button", { class: "primary", onclick: () => generate(model.value) }, "สร้างซับอัตโนมัติ"),
-      el("button", { onclick: addBlank }, "+ เพิ่มซับ")),
+      el("button", { class: "primary", onclick: () => generate(model.value) }, "Generate subtitles"),
+      el("button", { onclick: addBlank }, "+ Add subtitle")),
     el("div", { class: "row" },
-      el("button", { title: "นำเข้าซับจากไฟล์ .srt เช่นที่ดาวน์โหลดจาก YouTube Studio", onclick: () => srtInput.click() }, "นำเข้าไฟล์ .srt"),
+      el("button", { title: "Import subtitles from an .srt file, e.g. downloaded from YouTube Studio", onclick: () => srtInput.click() }, "Import .srt file"),
       srtInput),
     list);
 
@@ -115,17 +115,17 @@ export function initSubtitles() {
     const rows = p.subtitles.map((s) => ({ s, span: spanOf(s) }))
       .sort((a, b) => (a.span ? a.span[0] : 1e9 + a.s.src_start) - (b.span ? b.span[0] : 1e9 + b.s.src_start));
     list.replaceChildren(...(rows.length ? rows.map(({ s, span }) => {
-      const ta = el("textarea", { rows: 2, "aria-label": "ข้อความซับ" });
+      const ta = el("textarea", { rows: 2, "aria-label": "Subtitle text" });
       ta.value = s.text;
       ta.addEventListener("input", () => update((q) => (q.subtitles.find((x) => x.id === s.id).text = ta.value), "subs-text"));
       ta.addEventListener("focus", () => ui.selectedSubId !== s.id && setSelectedSub(s.id));
       return el("div", { class: `sub-row${s.id === ui.selectedSubId ? " selected" : ""}${span ? "" : " hidden-sub"}`, "data-id": s.id },
-        el("button", { class: "ghost time", title: "ไปที่ซับนี้", onclick: () => { setSelectedSub(s.id); span && player.seek(span[0]); } },
-          span ? fmtTime(span[0]) : "ซ่อน"),
+        el("button", { class: "ghost time", title: "Go to this subtitle", onclick: () => { setSelectedSub(s.id); span && player.seek(span[0]); } },
+          span ? fmtTime(span[0]) : "hidden"),
         ta,
-        el("button", { class: "ghost icon", title: "ลบซับนี้", onclick: () => update((q) => (q.subtitles = q.subtitles.filter((x) => x.id !== s.id)), "subs") }, "✕"),
-        span ? "" : el("span", { class: "muted small" }, "อยู่ในช่วงที่ตัดออก จึงไม่ถูกส่งออก"));
-    }) : [el("p", { class: "muted small" }, "ยังไม่มีซับ ตั้งช่วง In/Out แล้วกด “สร้างซับอัตโนมัติ”")]));
+        el("button", { class: "ghost icon", title: "Delete this subtitle", onclick: () => update((q) => (q.subtitles = q.subtitles.filter((x) => x.id !== s.id)), "subs") }, "✕"),
+        span ? "" : el("span", { class: "muted small" }, "Inside a cut section, so it won't be exported"));
+    }) : [el("p", { class: "muted small" }, "No subtitles yet. Set In/Out, then click “Generate subtitles”")]));
   };
   subscribe((why) => {
     if (why === "select") {

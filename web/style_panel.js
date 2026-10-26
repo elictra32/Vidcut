@@ -32,18 +32,18 @@ export function initStylePanel() {
     bg.addEventListener("input", () => bgOn.checked && set("bg_color", bg.value));
     refs.bg_color = { input: bg };
     const reset = el("button", { class: "ghost", onclick: () => update((p) => p.subtitles.forEach((s) => (s.x = s.y = null)), "subs-pos") },
-      "รีเซ็ตตำแหน่งซับทุกบรรทัด");
+      "Reset all subtitle positions");
     root.replaceChildren(
-      el("h2", {}, "สไตล์ซับ"),
-      el("label", { class: "field" }, el("span", {}, "ฟอนต์"), font),
-      slider("size", "ขนาด", 24, 160, 2),
-      el("div", { class: "row" }, color("color", "สีตัวอักษร"), color("outline_color", "สีขอบ")),
-      slider("outline_width", "ความหนาขอบ", 0, 12, 1),
-      slider("shadow", "เงา", 0, 8, 1),
-      el("label", { class: "field inline" }, el("span", {}, "พื้นหลังกล่อง"), bgOn, bg),
-      slider("default_x", "ตำแหน่งแนวนอน", 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`),
-      slider("default_y", "ตำแหน่งแนวตั้ง", 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`),
-      el("p", { class: "muted small" }, "ลากซับบนภาพตัวอย่างเพื่อย้ายเฉพาะบรรทัดนั้น (ดับเบิลคลิกเพื่อคืนตำแหน่งเริ่มต้น)"),
+      el("h2", {}, "Subtitle style"),
+      el("label", { class: "field" }, el("span", {}, "Font"), font),
+      slider("size", "Size", 24, 160, 2),
+      el("div", { class: "row" }, color("color", "Text color"), color("outline_color", "Outline color")),
+      slider("outline_width", "Outline width", 0, 12, 1),
+      slider("shadow", "Shadow", 0, 8, 1),
+      el("label", { class: "field inline" }, el("span", {}, "Box background"), bgOn, bg),
+      slider("default_x", "Horizontal position", 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`),
+      slider("default_y", "Vertical position", 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`),
+      el("p", { class: "muted small" }, "Drag a subtitle on the preview to move just that line (double-click to reset)"),
       reset);
     built = true;
   };

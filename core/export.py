@@ -161,8 +161,8 @@ def _prepare(project: Project, selection: Selection, with_extras: bool = True):
             pieces, intro_dur = selection_pieces(project.clips, selection), 0.0
     except ValueError:
         raise ExportError("selection_invalid",
-                          "ช่วงที่เลือกไม่ถูกต้อง หรือไม่มีช่วงที่เปิดใช้งานเหลืออยู่ "
-                          "กรุณาตั้งจุดเริ่ม/จบใหม่ และเปิดช่วงที่ถูกตัดอย่างน้อยหนึ่งช่วง") from None
+                          "The selection is invalid, or no enabled sections are left. "
+                          "Please set start/end again and re-enable at least one cut section") from None
     rendered = [RenderedSub(a + intro_dur, b + intro_dur, s.text, s.x, s.y)
                 for a, b, s in subtitles_for_export(project.clips, project.subtitles, selection)]
     return preset, pieces, rendered
@@ -192,10 +192,10 @@ def _ffmpeg(cmd, duration, progress_cb, cancel_event, wd):
         media.run_ffmpeg(cmd, duration, progress_cb, cancel_event, cwd=wd)
     except FFmpegError as e:
         raise ExportError("export_failed",
-                          "ส่งออกวิดีโอไม่สำเร็จ ลองลดช่วงที่เลือก หรือตรวจว่าไฟล์ต้นฉบับยังอยู่", e.details) from e
+                          "Export failed. Try a shorter selection, or check that the original file still exists", e.details) from e
     except FileNotFoundError as e:
         if "ffmpeg" in str(e).lower():
-            raise ExportError("ffmpeg_missing", "ไม่พบ ffmpeg กรุณารัน setup.bat อีกครั้ง") from e
+            raise ExportError("ffmpeg_missing", "ffmpeg not found. Please run setup.bat again") from e
         raise
 
 
@@ -212,12 +212,12 @@ def _unique_paths(out_dir: str, stem: str, ext: str) -> tuple[str, str]:
 
 def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=None) -> ExportResult:
     if not project.clips:
-        raise ExportError("no_clips", "ยังไม่มีคลิปในโปรเจกต์ กรุณาเพิ่มคลิปก่อน")
+        raise ExportError("no_clips", "No clips in the project. Please add a clip first")
     selection = project.selection or Selection(0.0, edited_duration(project.clips))
     preset, pieces, rendered = _prepare(project, selection)
     pieces, frames = _plan(pieces)
     if not pieces:
-        raise ExportError("selection_invalid", "ช่วงที่เลือกสั้นเกินไป กรุณาเลือกช่วงที่ยาวกว่านี้")
+        raise ExportError("selection_invalid", "The selection is too short. Please choose a longer range")
     report = progress_cb or (lambda p, m="": None)
     total = sum(p.src_end - p.src_start for p in pieces)
     ext = output_extension(project.export)
@@ -270,7 +270,7 @@ def render_preview_frame(project: Project, edited_t: float, out_png: str) -> Non
         try:
             media.run_ffmpeg(cmd, cwd=wd)
         except FFmpegError as e:
-            raise ExportError("preview_failed", "สร้างภาพตัวอย่างไม่สำเร็จ", e.details) from e
+            raise ExportError("preview_failed", "Couldn't create the sample frame", e.details) from e
         os.makedirs(os.path.dirname(os.path.abspath(out_png)), exist_ok=True)
         shutil.move(os.path.join(wd, "frame.png"), out_png)
     finally:

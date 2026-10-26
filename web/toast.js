@@ -12,8 +12,8 @@ export function showError(err) {
   const box = el("div", { class: "toast error" },
     el("strong", {}, p.message),
     p.hint ? el("div", { class: "hint" }, p.hint) : "",
-    p.details ? el("details", {}, el("summary", {}, "รายละเอียด"),
+    p.details ? el("details", {}, el("summary", {}, "Details"),
       el("pre", {}, typeof p.details === "string" ? p.details : JSON.stringify(p.details, null, 2))) : "",
-    el("button", { class: "toast-close", onclick: () => box.remove(), "aria-label": "ปิด" }, "×"));
+    el("button", { class: "toast-close", onclick: () => box.remove(), "aria-label": "Close" }, "×"));
   $("#toasts").append(box);
 }

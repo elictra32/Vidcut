@@ -48,7 +48,7 @@ def ensure_model(name: str, progress_cb=None, cancel_event=None, snapshot_downlo
                 bars[id(self)] = [self.n, self.total]
                 done, total = sum(b[0] for b in bars.values()), sum(b[1] for b in bars.values())
                 last[0] = max(last[0], min(1.0, done / total))  # more files may join: never go backwards
-                progress_cb(last[0], f"กำลังดาวน์โหลดโมเดล {round(last[0] * 100)}% (ครั้งแรกครั้งเดียว)")
+                progress_cb(last[0], f"Downloading model {round(last[0] * 100)}% (first use only)")
             return out
 
     try:
@@ -95,7 +95,7 @@ def _default_factory(name: str, progress_cb=None, cancel_event=None):
     from faster_whisper import WhisperModel
     path = ensure_model(name, progress_cb, cancel_event)
     if progress_cb:
-        progress_cb(0.0, "กำลังโหลดโมเดลเข้าหน่วยความจำ")
+        progress_cb(0.0, "Loading the model into memory")
     # os.cpu_count() counts hardware threads; assume 2 per core so we match physical cores.
     return WhisperModel(path, device="cpu", compute_type="int8",
                         cpu_threads=max(1, (os.cpu_count() or 2) // 2))

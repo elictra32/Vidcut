@@ -62,7 +62,7 @@ class State:
             for c in self.project.clips:
                 if c.id == clip_id:
                     return c
-        raise AppError("clip_not_found", "ไม่พบคลิปนี้ในโปรเจกต์", status=404)
+        raise AppError("clip_not_found", "Clip not found in the project", status=404)
 
 
 def _pick_file() -> str | None:
@@ -73,15 +73,15 @@ def _pick_file() -> str | None:
         import tkinter
         from tkinter import filedialog
     except ImportError as e:
-        raise AppError("picker_unavailable", "เปิดหน้าต่างเลือกไฟล์ไม่ได้",
-                       "วางพาธของไฟล์วิดีโอในช่องแทน", status=501) from e
+        raise AppError("picker_unavailable", "Couldn't open the file picker",
+                       "Paste the video file path into the box instead", status=501) from e
     root = tkinter.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
     try:
         return filedialog.askopenfilename(
-            title="เลือกวิดีโอ",
-            filetypes=[("วิดีโอ", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v"), ("ทุกไฟล์", "*.*")]) or None
+            title="Choose video",
+            filetypes=[("Video", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v"), ("All files", "*.*")]) or None
     finally:
         root.destroy()
 
@@ -94,12 +94,12 @@ def _pick_folder() -> str | None:
         import tkinter
         from tkinter import filedialog
     except ImportError as e:
-        raise AppError("picker_unavailable", "เปิดหน้าต่างเลือกโฟลเดอร์ไม่ได้", "พิมพ์พาธของโฟลเดอร์ในช่องแทน", status=501) from e
+        raise AppError("picker_unavailable", "Couldn't open the folder picker", "Type the folder path into the box instead", status=501) from e
     root = tkinter.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
     try:
-        return filedialog.askdirectory(title="เลือกโฟลเดอร์สำหรับไฟล์ที่ส่งออก") or None
+        return filedialog.askdirectory(title="Choose a folder for exported files") or None
     finally:
         root.destroy()
 
@@ -115,8 +115,8 @@ def create_app(home: str | None = None) -> FastAPI:
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
             if origin is not None and urlparse(origin).hostname not in ALLOWED_HOSTS:
-                err = AppError("forbidden_origin", "คำขอนี้มาจากเว็บไซต์อื่น จึงถูกปฏิเสธ",
-                               "ใช้ Vidcut ผ่านหน้าต่างที่เปิดจาก run.bat เท่านั้น", status=403)
+                err = AppError("forbidden_origin", "This request came from another website and was rejected",
+                               "Use Vidcut only through the window opened by run.bat", status=403)
                 return JSONResponse({"error": payload(err)}, status_code=403)
         return await call_next(request)
 
@@ -144,12 +144,12 @@ def create_app(home: str | None = None) -> FastAPI:
             if proj.preset not in PRESETS:
                 raise ValueError("preset")
         except (TypeError, KeyError, ValueError) as e:
-            raise AppError("project_invalid", "ข้อมูลโปรเจกต์ไม่ถูกต้อง", "ลองรีเฟรชหน้าเว็บแล้วทำใหม่",
+            raise AppError("project_invalid", "Invalid project data", "Refresh the page and try again",
                            str(e), status=422) from e
         with st.lock:
             if proj.rev != st.project.rev:
-                raise AppError("project_stale", "ข้อมูลในหน้านี้ไม่ใช่เวอร์ชันล่าสุด (มีงานเบื้องหลังเพิ่งทำเสร็จ)",
-                               "โหลดข้อมูลล่าสุดให้แล้ว ลองแก้ไขอีกครั้ง", status=409)
+                raise AppError("project_stale", "The data on this page is out of date (a background job just finished)",
+                               "The latest data was reloaded. Try your edit again", status=409)
             # The page owns keeps/framing/role/subtitles/style/selection. Everything about the media itself
             # (path, proxy, size, duration) is the server's, and clips only enter through /api/clips.
             current = {c.id: c for c in st.project.clips}
@@ -171,12 +171,12 @@ def create_app(home: str | None = None) -> FastAPI:
     def add_clip(path: str) -> dict:
         path = os.path.abspath(path)
         if not os.path.isfile(path):
-            raise AppError("file_missing", "ไม่พบไฟล์นี้", "ตรวจว่าไฟล์ยังอยู่ในตำแหน่งเดิม", path, status=404)
+            raise AppError("file_missing", "File not found", "Check that the file is still in its original location", path, status=404)
         try:
             info = probe(path)
         except FFmpegError as e:
-            raise AppError("unreadable_media", "ไฟล์วิดีโอนี้เสียหายหรืออ่านไม่ได้",
-                           "ลองเปิดไฟล์ด้วยโปรแกรมเล่นวิดีโอก่อน หรือแปลงไฟล์ใหม่", e.details) from e
+            raise AppError("unreadable_media", "This video file is damaged or unreadable",
+                           "Try opening it in a video player first, or convert the file", e.details) from e
         clip = Clip(id=uuid.uuid4().hex[:8], path=path, duration=info["duration"], width=info["width"],
                     height=info["height"], fps=info["fps"], has_audio=info["has_audio"],
                     keeps=[Keep(0.0, info["duration"])])
@@ -239,7 +239,7 @@ def create_app(home: str | None = None) -> FastAPI:
         clip = st.clip(clip_id)
         path = clip.proxy_path if clip.proxy_path and os.path.exists(clip.proxy_path) else clip.path
         if not os.path.isfile(path):
-            raise AppError("file_missing", "ไม่พบไฟล์ต้นฉบับ", "ตรวจว่าไฟล์ยังอยู่ในตำแหน่งเดิม", status=404)
+            raise AppError("file_missing", "Original file not found", "Check that the file is still in its original location", status=404)
         return FileResponse(path, media_type=mimetypes.guess_type(path)[0] or "video/mp4")
 
     # ---- subtitles from an SRT file (e.g. YouTube auto captions) -----------------------------
@@ -250,18 +250,18 @@ def create_app(home: str | None = None) -> FastAPI:
         only_selection = bool(body.get("only_selection", True))
         cues = parse_srt(str(body.get("srt_text", "")))
         if not cues:
-            raise AppError("srt_empty", "ไม่พบซับในไฟล์นี้", "ต้องเป็นไฟล์ .srt (UTF-8) เช่นที่ดาวน์โหลดจาก YouTube Studio")
+            raise AppError("srt_empty", "No subtitles found in this file", "It must be an .srt file (UTF-8), e.g. downloaded from YouTube Studio")
         st.clip(clip_id)  # 404 when unknown
         with st.lock:
             snap = copy.deepcopy(st.project)
         if only_selection and snap.selection is None:
-            raise AppError("no_selection", "ยังไม่ได้เลือกช่วงที่จะนำเข้า",
-                           "ตั้งจุด In/Out ก่อน หรือเลือกนำเข้าทั้งไฟล์")
+            raise AppError("no_selection", "No range selected for the import",
+                           "Set In/Out first, or import the whole file")
         subs = cues_to_subtitles(snap.clips, clip_id, cues, PRESETS[snap.preset], offset,
                                  snap.selection if only_selection else None)
         if not subs:
-            raise AppError("srt_no_match", "ไม่มีซับตรงกับช่วงเวลาของคลิปนี้",
-                           "เช็กว่าอัปโหลดไฟล์ต้นฉบับไฟล์เดียวกันขึ้น YouTube ลองเลื่อนเวลา หรือเลือกนำเข้าทั้งไฟล์")
+            raise AppError("srt_no_match", "No subtitles match this clip's time range",
+                           "Check that the same original file was uploaded to YouTube, try the time shift, or import the whole file")
         with st.lock:
             st.project.subtitles = [x for x in st.project.subtitles if x.clip_id != clip_id] + subs
             st.project.rev += 1
@@ -275,12 +275,12 @@ def create_app(home: str | None = None) -> FastAPI:
         with st.lock:
             snap = copy.deepcopy(st.project)
         if snap.selection is None:
-            raise AppError("no_selection", "ยังไม่ได้เลือกช่วงที่จะถอดเสียง",
-                           "ตั้งจุดเริ่ม/จบ (In/Out) บน timeline ก่อน")
+            raise AppError("no_selection", "No range selected for transcription",
+                           "Set start/end (In/Out) on the timeline first")
         factory = fake_whisper.factory if os.environ.get("VIDCUT_FAKE_WHISPER") == "1" else None
 
         def work(progress, cancel):
-            progress(0.0, "กำลังเตรียมเสียงและโหลดโมเดล (ครั้งแรกต้องดาวน์โหลด)")
+            progress(0.0, "Preparing audio and loading the model (first use downloads it)")
             subs = generate_subtitles(snap.clips, snap.selection, snap.preset, model, progress, cancel, factory)
             with st.lock:
                 st.project.subtitles = subs
@@ -293,7 +293,7 @@ def create_app(home: str | None = None) -> FastAPI:
     def post_export(body: dict | None = None):
         preset = (body or {}).get("preset")
         if preset is not None and preset not in PRESETS:
-            raise AppError("preset_unknown", "ไม่รู้จัก preset นี้")
+            raise AppError("preset_unknown", "Unknown preset")
         with st.lock:
             if preset:
                 st.project.preset = preset
@@ -316,8 +316,8 @@ def create_app(home: str | None = None) -> FastAPI:
                 probe = tempfile.NamedTemporaryFile(dir=path, prefix=".vidcut_", delete=True)
                 probe.close()
             except OSError as e:
-                raise AppError("folder_unwritable", "เขียนไฟล์ลงโฟลเดอร์นี้ไม่ได้",
-                               "เลือกโฟลเดอร์อื่น หรือตรวจสิทธิ์การเขียนของโฟลเดอร์นี้", str(e)) from e
+                raise AppError("folder_unwritable", "Can't write to this folder",
+                               "Choose another folder or check its write permissions", str(e)) from e
         with st.lock:
             st.project.export.out_dir = path
             st.save()
@@ -351,7 +351,7 @@ def create_app(home: str | None = None) -> FastAPI:
         with st.lock:
             snap = copy.deepcopy(st.project)
         if not snap.clips:
-            raise AppError("no_clips", "ยังไม่มีคลิปในโปรเจกต์", "เพิ่มคลิปก่อน")
+            raise AppError("no_clips", "No clips in the project", "Add a clip first")
         work_dir = tempfile.mkdtemp(prefix="vidcut_pf_")
         out = os.path.join(work_dir, "frame.png")
         try:
@@ -365,7 +365,7 @@ def create_app(home: str | None = None) -> FastAPI:
     def get_export(name: str):
         path = os.path.join(st.exports, name)
         if name != os.path.basename(name) or not os.path.isfile(path):
-            raise AppError("file_missing", "ไม่พบไฟล์ที่ส่งออก", status=404)
+            raise AppError("file_missing", "Exported file not found", status=404)
         return FileResponse(path, filename=name)
 
     # ---- jobs / housekeeping -------------------------------------------------------------
@@ -373,13 +373,13 @@ def create_app(home: str | None = None) -> FastAPI:
     def get_job(job_id: str):
         job = st.jobs.get(job_id)
         if job is None:
-            raise AppError("job_not_found", "ไม่พบงานนี้", status=404)
+            raise AppError("job_not_found", "Job not found", status=404)
         return job
 
     @app.get("/api/jobs/{job_id}/events")
     def job_events(job_id: str):
         if st.jobs.get(job_id) is None:
-            raise AppError("job_not_found", "ไม่พบงานนี้", status=404)
+            raise AppError("job_not_found", "Job not found", status=404)
 
         def gen():
             for snap in st.jobs.events(job_id):
@@ -389,13 +389,13 @@ def create_app(home: str | None = None) -> FastAPI:
     @app.post("/api/jobs/{job_id}/cancel")
     def cancel_job(job_id: str):
         if not st.jobs.cancel(job_id):
-            raise AppError("job_not_found", "ไม่พบงานนี้", status=404)
+            raise AppError("job_not_found", "Job not found", status=404)
         return {"ok": True}
 
     @app.post("/api/clear-temp")
     def clear_temp():
         if st.jobs.active():  # running jobs are using proxies and vidcut_* work dirs
-            raise AppError("busy", "มีงานกำลังทำงานอยู่", "รอให้งานเสร็จก่อน แล้วค่อยล้างไฟล์ชั่วคราว", status=409)
+            raise AppError("busy", "A job is running", "Wait for the job to finish, then clear temp files", status=409)
         freed = skipped = 0
         with st.lock:
             keep = {os.path.abspath(c.proxy_path) for c in st.project.clips if c.proxy_path}

@@ -28,9 +28,9 @@ try {
   server.project.selection = null;
   const put = await fetch(`${app.base}/api/project`, { method: "PUT", headers: json, body: JSON.stringify(server.project) });
   must(put.ok, "set up: the server no longer has the selection");
-  must(/ช่วงที่เลือก/.test(await page.$eval(".sel-info", (e) => e.textContent)), "set up: the page still shows its selection");
+  must(/Selection/.test(await page.$eval(".sel-info", (e) => e.textContent)), "set up: the page still shows its selection");
 
-  await page.click("text=สร้างซับอัตโนมัติ");
+  await page.click("text=Generate subtitles");
   await page.waitForSelector(".sub-row", { timeout: 20000 });
   must(true, "subtitles were generated anyway (the page re-sent the selection and retried)");
   const toasts = await page.$$eval(".toast.error", (n) => n.map((x) => x.textContent));

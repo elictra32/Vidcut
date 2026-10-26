@@ -176,7 +176,7 @@ def test_ensure_model_downloads_and_reports_progress():
     assert ensure_model("large-v3", progress_cb=lambda p, m="": seen.append((p, m)), snapshot_download=dl) == "/cache/large"
     fractions = [p for p, _ in seen]
     assert fractions == sorted(fractions) and fractions[-1] == pytest.approx(1.0)
-    assert all("ดาวน์โหลด" in m for _, m in seen)
+    assert all("Downloading" in m for _, m in seen)
 
 
 def test_ensure_model_only_counts_byte_bars():

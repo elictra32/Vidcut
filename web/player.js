@@ -49,8 +49,8 @@ async function load(el, clipId, atSrc) {
       el.addEventListener("loadedmetadata", resolve, { once: true });
       el.addEventListener("error", () => {
         if (el === video) {
-          showError({ payload: { message: "เล่นวิดีโอนี้ในเบราว์เซอร์ไม่ได้",
-            hint: "ถ้าเป็นไฟล์ HEVC/MKV ให้รอสร้างไฟล์พรีวิวให้เสร็จก่อน" } });
+          showError({ payload: { message: "This video can't be played in the browser",
+            hint: "For HEVC/MKV files, wait for the preview file to finish building" } });
         }
         resolve();
       }, { once: true });

@@ -60,7 +60,7 @@ const draw = rafThrottle(() => {
   if (!tot) {
     ctx.fillStyle = cssVar("--muted");
     ctx.font = "14px system-ui, sans-serif";
-    ctx.fillText("เพิ่มคลิปเพื่อเริ่มตัดต่อ", 16, h / 2);
+    ctx.fillText("Add a clip to start editing", 16, h / 2);
     return;
   }
   ctx.font = "11px system-ui, sans-serif";
@@ -149,11 +149,11 @@ export function initTimelineView() {
   const wrap = $("#edit-timeline-wrap");
   canvas = el("canvas", { class: "timeline-canvas", height: 150 });
   const bar = el("div", { class: "tl-bar" },
-    el("strong", {}, "ไทม์ไลน์ (หลังตัด Dead air)"),
+    el("strong", {}, "Timeline (after dead air cut)"),
     el("span", { class: "spacer" }),
-    el("button", { class: "ghost", onclick: () => zoom(0.5, player.getTime()) }, "ซูมเข้า"),
-    el("button", { class: "ghost", onclick: () => zoom(2, player.getTime()) }, "ซูมออก"),
-    el("button", { class: "ghost", onclick: fitView }, "พอดีช่วง"));
+    el("button", { class: "ghost", onclick: () => zoom(0.5, player.getTime()) }, "Zoom in"),
+    el("button", { class: "ghost", onclick: () => zoom(2, player.getTime()) }, "Zoom out"),
+    el("button", { class: "ghost", onclick: fitView }, "Fit"));
   wrap.replaceChildren(bar, canvas);
 
   canvas.addEventListener("pointerdown", (e) => {
