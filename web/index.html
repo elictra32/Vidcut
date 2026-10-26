@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vidcut</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Vidcut</h1>
+    <button id="btn-add" class="primary">+ เพิ่มคลิป</button>
+    <details class="path-add">
+      <summary>วางพาธไฟล์แทน</summary>
+      <input id="path-input" placeholder="C:\Videos\คลิป.mp4" size="36">
+      <button id="btn-add-path">เพิ่ม</button>
+    </details>
+    <span class="spacer"></span>
+    <div id="status" hidden></div>
+  </header>
+
+  <main class="layout">
+    <aside class="left">
+      <section id="clips-panel" class="panel"></section>
+      <section id="silence-panel" class="panel"></section>
+      <section id="subs-panel" class="panel"></section>
+    </aside>
+    <section class="center">
+      <div class="stage" id="stage">
+        <video id="video" playsinline></video>
+        <div id="safe-zone"></div>
+        <div id="sub-overlay"></div>
+      </div>
+      <div class="transport" id="transport"></div>
+    </section>
+    <aside class="right">
+      <section id="style-panel" class="panel"></section>
+      <section id="export-panel" class="panel"></section>
+    </aside>
+  </main>
+
+  <section class="timelines">
+    <div id="cut-strip-wrap"></div>
+    <div id="edit-timeline-wrap"></div>
+  </section>
+  <div id="toasts"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -61,8 +61,13 @@ def _rotation(stream: dict) -> int:
 
 
 def is_browser_playable(info: dict) -> bool:
-    return ("mp4" in info.get("container", "") and info.get("vcodec") == "h264"
-            and info.get("acodec") in ("aac", "mp3", None))
+    """True when a browser's <video> can play the file as-is (so no proxy is needed)."""
+    container, v, a = info.get("container", ""), info.get("vcodec"), info.get("acodec")
+    if "mp4" in container:
+        return v == "h264" and a in ("aac", "mp3", None)
+    if "webm" in container:  # ffprobe reports "matroska,webm" for both; the codecs decide
+        return v in ("vp8", "vp9", "av1") and a in ("opus", "vorbis", None)
+    return False
 
 
 def run_ffmpeg(args: list[str], duration: float = 0.0, progress_cb=None, cancel_event=None,

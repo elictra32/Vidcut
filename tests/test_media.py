@@ -38,3 +38,10 @@ def test_make_proxy_height_480(tmp_path):
     h = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                         "stream=height", "-of", "csv=p=0", out], capture_output=True, text=True).stdout
     assert int(h.strip()) == 480
+
+
+def test_is_browser_playable_webm_vp9_opus():
+    webm = {"vcodec": "vp9", "acodec": "opus", "container": "matroska,webm"}
+    assert media.is_browser_playable(webm) is True
+    assert media.is_browser_playable({**webm, "vcodec": "h264"}) is False  # h264 in mkv/webm: not reliable
+    assert media.is_browser_playable({**webm, "container": "matroska"}) is False

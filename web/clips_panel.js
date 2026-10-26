@@ -1,0 +1,65 @@
+import { api } from "./api.js";
+import { getProject, loadProject, reloadAfterJob, setCurrentClip, subscribe, ui, update } from "./state.js";
+import { remapSelection } from "./timeline_math.js";
+import { trackJob } from "./status.js";
+import { showError } from "./toast.js";
+import * as player from "./player.js";
+import { $, basename, el, fmtTime } from "./util.js";
+
+async function afterAdd(res) {
+  if (!res.clip) return; // file dialog cancelled
+  await loadProject();
+  setCurrentClip(res.clip.id);
+  if (res.job) {
+    // non-browser-playable source: wait for the preview copy before showing it
+    await trackJob("กำลังสร้างไฟล์พรีวิว", res.job);
+    await reloadAfterJob();
+  }
+  await player.showClip(res.clip.id);
+}
+
+export async function addClipFromDialog() {
+  try {
+    await afterAdd(await api("POST", "/api/clips/pick"));
+  } catch (e) {
+    showError(e);
+  }
+}
+
+export async function addClipFromPath(path) {
+  if (!path.trim()) return;
+  try {
+    await afterAdd(await api("POST", "/api/clips", { path: path.trim().replace(/^"|"$/g, "") }));
+  } catch (e) {
+    showError(e);
+  }
+}
+
+function removeClip(id) {
+  const before = structuredClone(getProject().clips);
+  update((p) => {
+    p.clips = p.clips.filter((c) => c.id !== id);
+    p.subtitles = p.subtitles.filter((s) => s.clip_id !== id);
+    p.selection = remapSelection(before, p.clips, p.selection);
+  }, "load");
+  if (ui.currentClipId === id) setCurrentClip(getProject().clips[0]?.id ?? null);
+}
+
+export function initClipsPanel() {
+  const root = $("#clips-panel");
+  const render = () => {
+    const p = getProject();
+    const list = el("ul", { class: "clip-list" });
+    for (const c of p?.clips ?? []) {
+      list.append(el("li", { class: c.id === ui.currentClipId ? "active" : "" },
+        el("button", { class: "clip-main", onclick: () => (setCurrentClip(c.id), player.showClip(c.id)) },
+          el("span", { class: "clip-name", title: c.path }, basename(c.path)),
+          el("span", { class: "muted" }, `${fmtTime(c.duration)} · ${c.width}×${c.height}${c.has_audio ? "" : " · ไม่มีเสียง"}`)),
+        el("button", { class: "ghost icon", title: "เอาคลิปออกจากโปรเจกต์ (ไม่ลบไฟล์)", onclick: () => removeClip(c.id) }, "✕")));
+    }
+    root.replaceChildren(el("h2", {}, "คลิป"),
+      p?.clips.length ? list : el("p", { class: "muted" }, "ยังไม่มีคลิป กด “เพิ่มคลิป” ด้านบน"));
+  };
+  subscribe(render);
+  render();
+}
