@@ -1,0 +1,22 @@
+[project]
+name = "vidcut"
+version = "0.1.0"
+description = "Local Thai video cutter with auto subtitles"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "starlette>=0.39",
+  "faster-whisper",
+  "pythainlp",
+  "numpy",
+  "httpx",
+  "pytest",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["core", "server"]
