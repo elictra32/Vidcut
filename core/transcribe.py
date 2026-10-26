@@ -1,6 +1,9 @@
 """Speech-to-text with faster-whisper (CPU, int8). Times returned are relative to the audio
 passed in (the selection output), not to any source file."""
 import os
+import wave
+
+import numpy as np
 
 from core import media
 from core.media import Cancelled, NoAudioError  # noqa: F401  (re-exported for callers)
@@ -75,6 +78,19 @@ def extract_selection_audio(clips, pieces, out_wav: str) -> None:
     media.run_ffmpeg(cmd + ["-filter_complex", graph, "-map", "[out]", "-ar", "16000", "-ac", "1", out_wav])
 
 
+def load_audio(wav_path: str) -> np.ndarray:
+    """Samples of a 16 kHz mono 16-bit wav (what extract_selection_audio writes) as float32 in [-1, 1].
+
+    Whisper is given these samples, not the path: faster-whisper opens a path with PyAV using an option
+    that older PyAV versions reject (TypeError: open() got an unexpected keyword argument 'metadata_errors')."""
+    with wave.open(wav_path, "rb") as w:
+        if (w.getframerate(), w.getnchannels(), w.getsampwidth()) != (16000, 1, 2):
+            raise ValueError(f"expected a 16 kHz mono 16-bit wav, got {w.getframerate()} Hz, "
+                             f"{w.getnchannels()} channel(s), {8 * w.getsampwidth()}-bit")
+        raw = w.readframes(w.getnframes())
+    return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+
+
 def _default_factory(name: str, progress_cb=None, cancel_event=None):
     from faster_whisper import WhisperModel
     path = ensure_model(name, progress_cb, cancel_event)
@@ -87,10 +103,11 @@ def _default_factory(name: str, progress_cb=None, cancel_event=None):
 
 def transcribe(wav_path: str, model_name: str = "large-v3", progress_cb=None, cancel_event=None,
                model_factory=None) -> list[Token]:
+    audio = load_audio(wav_path)
     model = model_factory(model_name) if model_factory else _default_factory(model_name, progress_cb, cancel_event)
     if cancel_event is not None and cancel_event.is_set():
         raise Cancelled()
-    segments, info = model.transcribe(wav_path, language="th", word_timestamps=True, vad_filter=True)
+    segments, info = model.transcribe(audio, language="th", word_timestamps=True, vad_filter=True)
     total = float(getattr(info, "duration", 0) or 0)
     tokens: list[Token] = []
     for s in segments:

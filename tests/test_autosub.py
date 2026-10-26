@@ -1,6 +1,8 @@
 import threading
+import wave
 from types import SimpleNamespace as NS
 
+import numpy as np
 import pytest
 
 from core.autosub import generate_subtitles
@@ -15,12 +17,23 @@ def seg(*words):
     return NS(words=ws, start=ws[0].start, end=ws[-1].end, text="".join(w for w, _, _ in words))
 
 
+def write_wav(path, seconds=1.0, rate=16000):
+    """A 16 kHz mono 16-bit wav, as extract_selection_audio makes: a quiet 440 Hz tone."""
+    t = np.arange(int(seconds * rate)) / rate
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes((np.sin(2 * np.pi * 440 * t) * 8000).astype(np.int16).tobytes())
+    return str(path)
+
+
 class FakeModel:
     def __init__(self, segments, duration=10.0):
-        self.segments, self.duration, self.kwargs = segments, duration, None
+        self.segments, self.duration, self.kwargs, self.audio = segments, duration, None, None
 
     def transcribe(self, audio, **kw):
-        self.kwargs = kw
+        self.audio, self.kwargs = audio, kw
         return iter(self.segments), NS(duration=self.duration)
 
 
@@ -86,7 +99,7 @@ def test_generate_subtitles_uses_preset_line_width(clip1):
 def test_transcribe_passes_th_word_timestamps_vad(tmp_path):
     model = FakeModel([seg(("สวัสดี", 0, 1))])
     f = factory_for(model)
-    toks = transcribe(str(tmp_path / "x.wav"), model_name="small", model_factory=f)
+    toks = transcribe(write_wav(tmp_path / "x.wav"), model_name="small", model_factory=f)
     assert f.calls == ["small"]
     assert model.kwargs["language"] == "th"
     assert model.kwargs["word_timestamps"] is True
@@ -94,18 +107,33 @@ def test_transcribe_passes_th_word_timestamps_vad(tmp_path):
     assert [(t.text, t.start, t.end) for t in toks] == [("สวัสดี", 0, 1)]
 
 
+def test_transcribe_hands_whisper_decoded_audio_not_a_path(tmp_path):
+    """faster-whisper opens a *path* with PyAV (av.open(..., metadata_errors=...)), which raises TypeError on
+    the PyAV versions pip resolves on some Windows installs. We already have a plain wav: pass the samples."""
+    model = FakeModel([seg(("สวัสดี", 0, 1))])
+    transcribe(write_wav(tmp_path / "x.wav", seconds=2.0), model_factory=factory_for(model))
+    assert isinstance(model.audio, np.ndarray) and model.audio.dtype == np.float32
+    assert len(model.audio) == 32000 and np.abs(model.audio).max() <= 1.0 and np.abs(model.audio).max() > 0.1
+
+
+def test_transcribe_of_a_wav_that_is_not_16k_mono_is_a_clear_error(tmp_path):
+    bad = write_wav(tmp_path / "x.wav", rate=8000)
+    with pytest.raises(ValueError, match="16 kHz"):
+        transcribe(bad, model_factory=factory_for(FakeModel([])))
+
+
 def test_transcribe_cancel(tmp_path):
     model = FakeModel([seg(("ก", 0, 1)), seg(("ข", 1, 2))])
     ev = threading.Event()
     ev.set()
     with pytest.raises(Cancelled):
-        transcribe(str(tmp_path / "x.wav"), model_factory=factory_for(model), cancel_event=ev)
+        transcribe(write_wav(tmp_path / "x.wav"), model_factory=factory_for(model), cancel_event=ev)
 
 
 def test_transcribe_reports_progress(tmp_path):
     model = FakeModel([seg(("ก", 0, 5)), seg(("ข", 5, 10))], duration=10.0)
     got = []
-    transcribe(str(tmp_path / "x.wav"), model_factory=factory_for(model),
+    transcribe(write_wav(tmp_path / "x.wav"), model_factory=factory_for(model),
                progress_cb=lambda p, m: got.append(p))
     assert got[-1] == pytest.approx(1.0) and got == sorted(got)
 
