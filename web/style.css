@@ -114,3 +114,14 @@ textarea { font: inherit; color: var(--text); background: var(--panel-2); border
 .sub-row .time { font-variant-numeric: tabular-nums; font-size: 12px; padding: 4px; }
 .sub-row .small { grid-column: 2 / -1; }
 .sub-row.hidden-sub textarea { opacity: 0.55; }
+
+#safe-zone { position: absolute; display: none; pointer-events: none; border: 1px dashed rgba(255, 255, 255, 0.35); }
+h3 { font-size: 12px; margin: 10px 0 6px; color: var(--muted); font-weight: 600; }
+.seg { display: grid; grid-auto-flow: column; gap: 4px; margin-bottom: 10px; }
+.seg button { border-radius: 6px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+.export-result { margin-top: 10px; }
+.export-result a { color: var(--accent); }
+.frame-dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; max-width: min(92vw, 520px); }
+.frame-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.frame-dialog img { display: block; max-width: 100%; max-height: 70vh; margin: 8px auto 12px; }

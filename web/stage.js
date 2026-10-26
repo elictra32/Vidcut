@@ -10,8 +10,10 @@ const stage = $("#stage");
 const frame = $("#frame");
 const video = $("#video");
 const overlay = $("#sub-overlay");
+const safeZone = $("#safe-zone");
 const nodes = new Map(); // subtitle id -> element
 let drag = null;
+let cropDrag = null;
 
 const preset = () => getPresets()[getProject()?.preset] ?? { width: 1080, height: 1920 };
 
@@ -32,8 +34,19 @@ function layout() {
     video.style.objectFit = "contain";
     video.style.objectPosition = "50% 50%";
   }
+  const sz = getPresets()[p?.preset]?.safe_zone;
+  safeZone.style.display = ui.showSafeZone && sz ? "block" : "none";
+  if (sz) Object.assign(safeZone.style, { top: `${sz.top * 100}%`, bottom: `${sz.bottom * 100}%`, left: `${sz.left * 100}%`, right: `${sz.right * 100}%` });
+  frame.style.cursor = cropAxis(clip, pr) ? "ew-resize" : "default";
   render();
 }
+
+/** Horizontal overflow (px) of the covered video when cropping, else 0. */
+function cropOverflow(clip, pr) {
+  if (!clip || clip.framing.mode !== "crop") return 0;
+  return Math.max(0, frame.clientHeight * (clip.width / clip.height) - frame.clientWidth);
+}
+const cropAxis = (clip, pr) => cropOverflow(clip, pr) > 1;
 
 function style(node, sub, st, scale) {
   const box = st.bg_color != null;
@@ -112,7 +125,27 @@ function startDrag(e, id) {
   drag.node.addEventListener("pointerup", up);
 }
 
+function startCrop(e) {
+  if (e.target.closest(".sub")) return;
+  const p = getProject();
+  const clip = p?.clips.find((c) => c.id === (player.getLoadedClipId() ?? ui.currentClipId));
+  const overflow = cropOverflow(clip, preset());
+  if (!clip || overflow <= 1) return;
+  frame.setPointerCapture(e.pointerId);
+  cropDrag = { x: e.clientX, cx: clip.framing.crop_center_x, overflow, clip };
+}
+
+function moveCrop(e) {
+  if (!cropDrag) return;
+  const cx = Math.min(1, Math.max(0, cropDrag.cx - (e.clientX - cropDrag.x) / cropDrag.overflow));
+  update(() => (cropDrag.clip.framing.crop_center_x = +cx.toFixed(3)), "framing");
+}
+
 export function initStage() {
+  ui.showSafeZone = true;
+  frame.addEventListener("pointerdown", startCrop);
+  frame.addEventListener("pointermove", moveCrop);
+  frame.addEventListener("pointerup", () => (cropDrag = null));
   subscribe(layout);
   player.onTime(render);
   new ResizeObserver(layout).observe(stage);

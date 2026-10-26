@@ -15,10 +15,11 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from core import media
 from core.autosub import generate_subtitles
-from core.export import render_preview_frame, run_export  # noqa: F401  (render_preview_frame used in Task 11)
+from core.export import render_preview_frame, run_export
 from core.media import FFmpegError, is_browser_playable, make_proxy, probe
 from core.models import Clip, Keep, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
@@ -217,8 +218,24 @@ def create_app(home: str | None = None) -> FastAPI:
 
         def work(progress, cancel):
             res = run_export(snap, st.exports, progress, cancel)
-            return {"mp4": os.path.basename(res.mp4), "srt": os.path.basename(res.srt)}
+            return {"mp4": os.path.basename(res.mp4), "srt": os.path.basename(res.srt), "dir": st.exports}
         return {"job": st.jobs.submit(work, "export")}
+
+    @app.post("/api/preview-frame")
+    def post_preview_frame(body: dict):
+        """Render one real frame through the export pipeline, so framing/subtitles can be checked."""
+        with st.lock:
+            snap = copy.deepcopy(st.project)
+        if not snap.clips:
+            raise AppError("no_clips", "ยังไม่มีคลิปในโปรเจกต์", "เพิ่มคลิปก่อน")
+        work_dir = tempfile.mkdtemp(prefix="vidcut_pf_")
+        out = os.path.join(work_dir, "frame.png")
+        try:
+            render_preview_frame(snap, float(body.get("t", 0)), out)
+        except Exception:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            raise
+        return FileResponse(out, media_type="image/png", background=BackgroundTask(shutil.rmtree, work_dir, True))
 
     @app.get("/exports/{name}")
     def get_export(name: str):

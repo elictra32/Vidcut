@@ -1,6 +1,8 @@
 """Project data model. Everything is a plain dataclass so it round-trips through JSON."""
 from dataclasses import dataclass, field, asdict
 
+from core.presets import PRESETS
+
 
 @dataclass
 class Keep:
@@ -61,13 +63,21 @@ class Selection:
     end: float
 
 
+DEFAULT_PRESET = "tiktok"
+
+
+def _default_style() -> SubtitleStyle:
+    """A new project starts with its default preset's subtitle style, not the generic one."""
+    return SubtitleStyle(**PRESETS[DEFAULT_PRESET].style_overrides)
+
+
 @dataclass
 class Project:
     clips: list[Clip] = field(default_factory=list)
     selection: Selection | None = None
     subtitles: list[Subtitle] = field(default_factory=list)
-    style: SubtitleStyle = field(default_factory=SubtitleStyle)
-    preset: str = "tiktok"
+    style: SubtitleStyle = field(default_factory=_default_style)
+    preset: str = DEFAULT_PRESET
 
 
 def project_to_dict(p: Project) -> dict:

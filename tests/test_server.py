@@ -244,3 +244,31 @@ def test_bundled_fonts_are_served_for_the_preview(client):
     r = client.get("/fonts/Sarabun-Regular.ttf")
     assert r.status_code == 200 and len(r.content) > 10000
     assert client.get("/fonts/nothere.ttf").status_code == 404
+
+
+def png_size(data: bytes) -> tuple[int, int]:
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+@pytest.mark.skipif(not has_libass(), reason="ffmpeg without libass")
+def test_preview_frame_returns_png_with_preset_dimensions(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))
+    r = client.post("/api/preview-frame", json={"t": 1.0})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    assert png_size(r.content) == (1080, 1920)
+    put_project(client, preset="youtube")
+    assert png_size(client.post("/api/preview-frame", json={"t": 1.0}).content) == (1920, 1080)
+
+
+def test_preview_frame_without_clips_is_thai_error(client):
+    r = client.post("/api/preview-frame", json={"t": 0})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "no_clips"
+
+
+@pytest.mark.skipif(not has_libass(), reason="ffmpeg without libass")
+def test_export_result_reports_output_folder(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))
+    put_project(client, selection={"start": 0, "end": 2})
+    j = wait_job(client, client.post("/api/export", json={}).json()["job"])
+    assert os.path.isdir(j["result"]["dir"]) and os.path.exists(os.path.join(j["result"]["dir"], j["result"]["mp4"]))

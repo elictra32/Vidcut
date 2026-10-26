@@ -72,3 +72,9 @@ export function setSelectedSub(id) {
   ui.selectedSubId = id;
   notify("select");
 }
+
+/** Change transient UI state (not saved with the project). */
+export function setUi(patch, why = "ui") {
+  Object.assign(ui, patch);
+  notify(why);
+}
