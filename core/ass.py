@@ -1,7 +1,9 @@
 """Subtitle output: ASS (burned in by libass at export) and SRT (sidecar file).
-The style -> CSS mapping in web/subtitles.js mirrors _style_line; keep them in step."""
+The style -> CSS mapping is `style()` in web/stage.js; keep it in step with _style_line.
+style.size is the CSS em size in output pixels; core/fonts.py converts it to libass Fontsize."""
 from dataclasses import dataclass
 
+from core.fonts import ass_size_factor
 from core.models import SubtitleStyle
 
 
@@ -38,7 +40,7 @@ def _style_line(style: SubtitleStyle) -> str:
     outline_color = _ass_color(style.bg_color) if box else _ass_color(style.outline_color)
     border_style = 3 if box else 1
     return ("Style: Default," + ",".join(str(v) for v in [
-        style.font, style.size, _ass_color(style.color), _ass_color(style.color),
+        style.font, round(style.size * ass_size_factor(style.font)), _ass_color(style.color), _ass_color(style.color),
         outline_color, _ass_color("#000000", 0x80),
         0, 0, 0, 0, 100, 100, 0, 0, border_style, style.outline_width, style.shadow,
         5, 0, 0, 0, 1]))

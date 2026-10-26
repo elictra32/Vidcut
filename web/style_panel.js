@@ -1,8 +1,5 @@
-import { getProject, subscribe, update } from "./state.js";
+import { getFonts, getProject, subscribe, update } from "./state.js";
 import { $, el } from "./util.js";
-
-// Fonts shipped in /fonts: the browser preview and the ffmpeg export both use these.
-const FONTS = ["Sarabun", "Prompt"];
 
 export function initStylePanel() {
   const root = $("#style-panel");
@@ -25,7 +22,7 @@ export function initStylePanel() {
   };
 
   const build = () => {
-    const font = el("select", {}, FONTS.map((f) => el("option", { value: f }, f)));
+    const font = el("select", {}, getFonts().map((f) => el("option", { value: f }, f))); // the bundled fonts, from the server
     font.addEventListener("change", () => set("font", font.value));
     refs.font = { input: font };
     const bgOn = el("input", { type: "checkbox" });

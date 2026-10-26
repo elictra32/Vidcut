@@ -6,7 +6,8 @@ import threading
 import pytest
 
 from core import export
-from core.export import ExportError, build_ffmpeg_cmd, build_filter_graph, render_preview_frame, run_export
+from core import export as export_mod
+from core.export import ExportError, build_ffmpeg_cmd, build_filter_graph, frame_counts, render_preview_frame, run_export
 from core.media import Cancelled
 from core.models import Clip, Framing, Keep, Project, Selection, Subtitle
 from core.presets import PRESETS
@@ -43,12 +44,13 @@ def test_filter_graph_concat_and_relative_subtitles():
     assert "/abs/in" not in g and ":\\" not in g
 
 
-def test_cmd_uses_input_seek_per_piece_and_script_graph():
+def test_cmd_uses_input_seek_per_piece_and_inline_graph():
     pieces = [Piece("c1", 2, 4, 0), Piece("c1", 6, 8, 2)]
     cmd = build_ffmpeg_cmd([fake_clip()], pieces, PRESETS["tiktok"], "subs.ass", "out.mp4")
     assert cmd.count("-ss") == 2 and cmd.count("-i") == 2
     assert cmd[cmd.index("-ss") + 1] == "2" and cmd[cmd.index("-t") + 1] == "2"
-    assert cmd[cmd.index("-filter_complex_script") + 1] == "graph.txt"
+    assert "-filter_complex_script" not in cmd  # deprecated in FFmpeg 7+; winget installs current ffmpeg
+    assert "concat=n=2" in cmd[cmd.index("-filter_complex") + 1]
     assert cmd[-1] == "out.mp4"
     assert "libx264" in cmd and "aac" in cmd and "+faststart" in cmd
 
@@ -140,3 +142,69 @@ def test_render_preview_frame_png_dimensions(tmp_path):
     render_preview_frame(real_project(p), 1.0, png)
     v = probe_streams(png)["streams"][0]
     assert (v["width"], v["height"]) == (1080, 1920)
+
+
+def test_frame_counts_never_accumulate_rounding():
+    n = 40
+    pieces = [Piece("c1", i * 3.0, i * 3.0 + 1.37, i * 1.37) for i in range(n)]
+    frames = frame_counts(pieces)
+    assert sum(frames) == round(n * 1.37 * 30)
+    assert all(abs(f - 1.37 * 30) <= 1 for f in frames)
+
+
+def test_filter_graph_makes_every_piece_frame_and_sample_exact():
+    pieces = [Piece("c1", 0, 1.37, 0), Piece("c1", 5, 6.37, 1.37)]
+    g = build_filter_graph([fake_clip()], pieces, PRESETS["tiktok"], "s.ass")
+    frames = frame_counts(pieces)
+    for n in frames:
+        assert f"trim=end_frame={n}" in g
+        assert f"atrim=end_sample={n * 1600}" in g
+    assert "tpad=stop=4:stop_mode=clone" in g and "apad=pad_dur=0.15" in g  # bounded: never infinite streams
+
+
+def media_duration(path, stream):
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", stream, "-show_entries", "stream=duration",
+                          "-of", "csv=p=0", path], capture_output=True, text=True).stdout.strip()
+    return float(out)
+
+
+def many_cuts_project(path, n=30, keep=0.7, step=1.3, preset="tiktok", duration=40):
+    clip = Clip(id="c1", path=path, duration=duration, width=640, height=360, fps=29.97, has_audio=True,
+                keeps=[Keep(i * step, i * step + keep) for i in range(n)])
+    return Project(clips=[clip], selection=None, preset=preset)
+
+
+@needs_libass
+def test_export_with_many_cuts_stays_in_sync(tmp_path):
+    """Each cut used to leave ~2 frames of extra video, so captions drifted ~2 s over 40 cuts."""
+    p = make_clip(str(tmp_path / "in.mp4"), [("tone", 41)], fps="30000/1001")
+    proj = many_cuts_project(p, n=20, keep=1.37, step=2.0, duration=41, preset="youtube")
+    res = run_export(proj, str(tmp_path / "out"))
+    expected = 20 * 1.37
+    assert media_duration(res.mp4, "v:0") == pytest.approx(expected, abs=1 / 30 + 0.01)
+    assert media_duration(res.mp4, "a:0") == pytest.approx(expected, abs=0.06)
+
+
+@needs_libass
+def test_export_with_many_pieces_runs_in_bounded_batches(tmp_path, monkeypatch):
+    monkeypatch.setattr(export_mod, "BATCH", 4)
+    runs = []
+    real = export_mod.media.run_ffmpeg
+    monkeypatch.setattr(export_mod.media, "run_ffmpeg", lambda args, *a, **k: (runs.append(list(args)), real(args, *a, **k))[1])
+    p = make_clip(str(tmp_path / "in.mp4"), [("tone", 40)])
+    res = run_export(many_cuts_project(p, n=10), str(tmp_path / "out"))
+    inputs = [a.count("-i") for a in runs]
+    assert inputs == [4, 4, 2, 1]  # three batches of <=4 pieces, then one concat + subtitles pass
+    assert media_duration(res.mp4, "v:0") == pytest.approx(10 * 0.7, abs=1 / 30 + 0.01)
+
+
+@needs_libass
+def test_second_export_never_overwrites_the_first(tmp_path):
+    p = make_clip(str(tmp_path / "in.mp4"), SPEC)
+    out = str(tmp_path / "out")
+    first = run_export(real_project(p, sel=(0, 2)), out)
+    size1 = os.path.getsize(first.mp4)
+    second = run_export(real_project(p, sel=(1, 4)), out)
+    assert second.mp4 != first.mp4 and second.srt != first.srt
+    assert os.path.exists(first.mp4) and os.path.getsize(first.mp4) == size1
+    assert os.path.basename(second.mp4) == "in_tiktok_2.mp4"

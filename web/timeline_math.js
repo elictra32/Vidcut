@@ -130,3 +130,20 @@ export function dragEdgeToSource(clips, sub, which, t) {
   }
   return which === "start" ? Math.min(src, sub.src_end - MIN_SUB) : Math.max(src, sub.src_start + MIN_SUB);
 }
+
+/**
+ * What playback should do when the loaded clip is at source time `t`:
+ * keep playing, seek past a removed gap, hop to the next clip with something kept, or end.
+ */
+export function nextPlayTarget(clips, clipId, t) {
+  const i = clips.findIndex((c) => c.id === clipId);
+  const keeps = enabledKeeps(clips[i]);
+  if (keeps.some((k) => t >= k.start - 0.03 && t < k.end)) return { kind: "play" };
+  const next = keeps.find((k) => k.start > t);
+  if (next) return { kind: "seek", src: next.start };
+  for (const c of clips.slice(i + 1)) {
+    const first = enabledKeeps(c)[0];
+    if (first) return { kind: "clip", clipId: c.id, src: first.start };
+  }
+  return { kind: "end" };
+}

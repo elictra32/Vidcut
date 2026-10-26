@@ -8,12 +8,12 @@ def _run(args):
     subprocess.run(args, check=True, capture_output=True)
 
 
-def make_clip(path, seconds_spec, size="640x360", with_audio=True, rotate=0, vcodec="libx264"):
+def make_clip(path, seconds_spec, size="640x360", with_audio=True, rotate=0, vcodec="libx264", fps="25"):
     """Create a clip whose audio follows seconds_spec: [("tone"|"silence", seconds), ...]."""
     total = sum(s for _, s in seconds_spec)
     tmp = path + ".tmp.mp4" if rotate else path
     args = ["ffmpeg", "-y", "-hide_banner", "-f", "lavfi", "-i",
-            f"testsrc=size={size}:rate=25:duration={total}"]
+            f"testsrc=size={size}:rate={fps}:duration={total}"]
     if with_audio:
         parts = []
         for i, (kind, secs) in enumerate(seconds_spec):

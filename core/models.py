@@ -78,6 +78,7 @@ class Project:
     subtitles: list[Subtitle] = field(default_factory=list)
     style: SubtitleStyle = field(default_factory=_default_style)
     preset: str = DEFAULT_PRESET
+    rev: int = 0  # bumped whenever the server itself changes the project (jobs); stale saves are refused
 
 
 def project_to_dict(p: Project) -> dict:
@@ -98,4 +99,5 @@ def project_from_dict(d: dict) -> Project:
         subtitles=[Subtitle(**s) for s in d.get("subtitles", [])],
         style=SubtitleStyle(**d.get("style", {})),
         preset=d.get("preset", "tiktok"),
+        rev=int(d.get("rev", 0)),
     )

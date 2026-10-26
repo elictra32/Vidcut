@@ -8,6 +8,7 @@ import tempfile
 import threading
 import uuid
 import webbrowser
+from urllib.parse import urlparse
 from dataclasses import asdict
 from pathlib import Path
 
@@ -16,10 +17,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import media
 from core.autosub import generate_subtitles
 from core.export import render_preview_frame, run_export
+from core.fonts import FONT_FILES
 from core.media import FFmpegError, is_browser_playable, make_proxy, probe
 from core.models import Clip, Keep, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
@@ -31,6 +34,7 @@ from server.jobs import JobRunner
 from server.project_store import default_home, load_project, save_project
 
 HOST = "127.0.0.1"
+ALLOWED_HOSTS = ("127.0.0.1", "localhost")  # Host/Origin we answer to: blocks DNS rebinding and cross-site POSTs
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 FONTS_DIR = Path(__file__).resolve().parent.parent / "fonts"
 TEMP_PREFIXES = ("vidcut_",)
@@ -82,6 +86,18 @@ def _pick_file() -> str | None:
 def create_app(home: str | None = None) -> FastAPI:
     st = State(home or default_home())
     app = FastAPI(title="Vidcut")
+    app.state.st = st
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(ALLOWED_HOSTS))
+
+    @app.middleware("http")
+    async def refuse_cross_origin_writes(request: Request, call_next):
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            if origin is not None and urlparse(origin).hostname not in ALLOWED_HOSTS:
+                err = AppError("forbidden_origin", "คำขอนี้มาจากเว็บไซต์อื่น จึงถูกปฏิเสธ",
+                               "ใช้ Vidcut ผ่านหน้าต่างที่เปิดจาก run.bat เท่านั้น", status=403)
+                return JSONResponse({"error": payload(err)}, status_code=403)
+        return await call_next(request)
 
     @app.exception_handler(AppError)
     async def _app_error(_: Request, e: AppError):
@@ -97,7 +113,8 @@ def create_app(home: str | None = None) -> FastAPI:
     def get_project():
         with st.lock:
             return {"project": project_to_dict(st.project),
-                    "presets": {k: asdict(v) for k, v in PRESETS.items()}}
+                    "presets": {k: asdict(v) for k, v in PRESETS.items()},
+                    "fonts": list(FONT_FILES)}
 
     @app.put("/api/project")
     def put_project(body: dict):
@@ -109,9 +126,23 @@ def create_app(home: str | None = None) -> FastAPI:
             raise AppError("project_invalid", "ข้อมูลโปรเจกต์ไม่ถูกต้อง", "ลองรีเฟรชหน้าเว็บแล้วทำใหม่",
                            str(e), status=422) from e
         with st.lock:
+            if proj.rev != st.project.rev:
+                raise AppError("project_stale", "ข้อมูลในหน้านี้ไม่ใช่เวอร์ชันล่าสุด (มีงานเบื้องหลังเพิ่งทำเสร็จ)",
+                               "โหลดข้อมูลล่าสุดให้แล้ว ลองแก้ไขอีกครั้ง", status=409)
+            # The page owns keeps/framing/subtitles/style/selection. Everything about the media itself
+            # (path, proxy, size, duration) is the server's, and clips only enter through /api/clips.
+            current = {c.id: c for c in st.project.clips}
+            clips = []
+            for c in proj.clips:
+                known = current.get(c.id)
+                if known is not None:
+                    known.keeps, known.framing = c.keeps, c.framing
+                    clips.append(known)
+            proj.clips = clips
+            proj.subtitles = [s for s in proj.subtitles if s.clip_id in current]
             st.project = proj
             st.save()
-        return {"ok": True}
+            return {"ok": True, "rev": st.project.rev}
 
     # ---- clips ---------------------------------------------------------------------------
     def add_clip(path: str) -> dict:
@@ -128,6 +159,7 @@ def create_app(home: str | None = None) -> FastAPI:
                     keeps=[Keep(0.0, info["duration"])])
         with st.lock:
             st.project.clips.append(clip)
+            st.project.rev += 1
             st.save()
         job = None
         if not is_browser_playable(info):
@@ -138,9 +170,10 @@ def create_app(home: str | None = None) -> FastAPI:
                 make_proxy(path, out, progress, cancel)
                 with st.lock:
                     st.clip(clip.id).proxy_path = out
+                    st.project.rev += 1
                     st.save()
                 return {"proxy_path": out}
-            job = st.jobs.submit(work, "proxy")
+            job = st.jobs.submit(work, "proxy", pool="proxy")
         return {"clip": asdict(clip), "job": job}
 
     @app.post("/api/clips")
@@ -165,6 +198,7 @@ def create_app(home: str | None = None) -> FastAPI:
             keeps = keeps_from_silences(sil, duration, padding) or [Keep(0.0, duration)]
             with st.lock:
                 st.clip(clip_id).keeps = keeps
+                st.project.rev += 1
                 st.save()
             return {"keeps": [asdict(k) for k in keeps]}
         return {"job": st.jobs.submit(work, "silence")}
@@ -201,6 +235,7 @@ def create_app(home: str | None = None) -> FastAPI:
             subs = generate_subtitles(snap.clips, snap.selection, snap.preset, model, progress, cancel, factory)
             with st.lock:
                 st.project.subtitles = subs
+                st.project.rev += 1
                 st.save()
             return {"count": len(subs), "empty": not subs}
         return {"job": st.jobs.submit(work, "transcribe")}
@@ -270,20 +305,27 @@ def create_app(home: str | None = None) -> FastAPI:
 
     @app.post("/api/clear-temp")
     def clear_temp():
-        freed = 0
+        if st.jobs.active():  # running jobs are using proxies and vidcut_* work dirs
+            raise AppError("busy", "มีงานกำลังทำงานอยู่", "รอให้งานเสร็จก่อน แล้วค่อยล้างไฟล์ชั่วคราว", status=409)
+        freed = skipped = 0
         with st.lock:
             keep = {os.path.abspath(c.proxy_path) for c in st.project.clips if c.proxy_path}
         if os.path.isdir(st.proxies):
             for f in os.listdir(st.proxies):
                 p = os.path.abspath(os.path.join(st.proxies, f))
-                if p not in keep:
-                    freed += os.path.getsize(p)
+                if p in keep:
+                    continue
+                try:
+                    size = os.path.getsize(p)
                     os.remove(p)
+                    freed += size
+                except OSError:  # e.g. still open in a player on Windows
+                    skipped += 1
         tmp = tempfile.gettempdir()
         for d in os.listdir(tmp):
             if d.startswith(TEMP_PREFIXES) and os.path.isdir(os.path.join(tmp, d)):
                 shutil.rmtree(os.path.join(tmp, d), ignore_errors=True)
-        return {"freed_bytes": freed}
+        return {"freed_bytes": freed, "skipped": skipped}
 
     if FONTS_DIR.is_dir():  # bundled Thai fonts, so the browser preview matches the export
         app.mount("/fonts", StaticFiles(directory=str(FONTS_DIR)), name="fonts")

@@ -16,7 +16,8 @@ export async function trackJob(label, jobId) {
   try {
     const job = await followJob(jobId, (j) => {
       prog.value = j.percent;
-      text.textContent = j.message ? `${label} · ${j.message}` : `${label} ${Math.round(j.percent * 100)}%`;
+      text.textContent = j.state === "queued" ? `${label} · รอคิวงานก่อนหน้า`
+        : j.message ? `${label} · ${j.message}` : `${label} ${Math.round(j.percent * 100)}%`;
     });
     if (job.state === "error") {
       showError(new ApiError(job.error, 500));

@@ -7,6 +7,51 @@ from core.media import Cancelled, NoAudioError  # noqa: F401  (re-exported for c
 from core.thai_split import Token
 
 MODELS = ("large-v3", "medium", "small")
+HF_REPOS = {n: f"Systran/faster-whisper-{n}" for n in MODELS}
+# the same files faster-whisper itself fetches, so the cache we fill is the one it loads
+HF_PATTERNS = ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"]
+
+
+def model_cache_dir() -> str | None:
+    """VIDCUT_MODEL_DIR relocates the model cache (e.g. when the Windows profile path has Thai characters)."""
+    return os.environ.get("VIDCUT_MODEL_DIR") or None
+
+
+def ensure_model(name: str, progress_cb=None, cancel_event=None, snapshot_download=None) -> str:
+    """Local path of a Whisper model, downloading it first if needed, with progress and cancel."""
+    if snapshot_download is None:
+        from huggingface_hub import snapshot_download
+    kw = {"repo_id": HF_REPOS.get(name, name), "allow_patterns": HF_PATTERNS, "cache_dir": model_cache_dir()}
+    try:
+        return snapshot_download(local_files_only=True, **kw)  # already downloaded: instant
+    except Exception:  # noqa: BLE001 - "not cached" has several exception types across hub versions
+        pass
+    from tqdm.auto import tqdm
+
+    bars: dict[int, list[float]] = {}
+    last = [0.0]
+    sink = open(os.devnull, "w")
+
+    class Bar(tqdm):
+        def __init__(self, *a, **k):
+            k["disable"], k["file"] = False, sink  # a disabled tqdm never counts; keep the console quiet
+            super().__init__(*a, **k)
+
+        def update(self, n=1):
+            out = super().update(n)
+            if cancel_event is not None and cancel_event.is_set():
+                raise Cancelled()
+            if self.unit == "B" and self.total and progress_cb:
+                bars[id(self)] = [self.n, self.total]
+                done, total = sum(b[0] for b in bars.values()), sum(b[1] for b in bars.values())
+                last[0] = max(last[0], min(1.0, done / total))  # more files may join: never go backwards
+                progress_cb(last[0], f"กำลังดาวน์โหลดโมเดล {round(last[0] * 100)}% (ครั้งแรกครั้งเดียว)")
+            return out
+
+    try:
+        return snapshot_download(tqdm_class=Bar, **kw)
+    finally:
+        sink.close()
 
 
 def extract_selection_audio(clips, pieces, out_wav: str) -> None:
@@ -30,16 +75,21 @@ def extract_selection_audio(clips, pieces, out_wav: str) -> None:
     media.run_ffmpeg(cmd + ["-filter_complex", graph, "-map", "[out]", "-ar", "16000", "-ac", "1", out_wav])
 
 
-def _default_factory(name: str):
+def _default_factory(name: str, progress_cb=None, cancel_event=None):
     from faster_whisper import WhisperModel
+    path = ensure_model(name, progress_cb, cancel_event)
+    if progress_cb:
+        progress_cb(0.0, "กำลังโหลดโมเดลเข้าหน่วยความจำ")
     # os.cpu_count() counts hardware threads; assume 2 per core so we match physical cores.
-    return WhisperModel(name, device="cpu", compute_type="int8",
+    return WhisperModel(path, device="cpu", compute_type="int8",
                         cpu_threads=max(1, (os.cpu_count() or 2) // 2))
 
 
 def transcribe(wav_path: str, model_name: str = "large-v3", progress_cb=None, cancel_event=None,
                model_factory=None) -> list[Token]:
-    model = (model_factory or _default_factory)(model_name)
+    model = model_factory(model_name) if model_factory else _default_factory(model_name, progress_cb, cancel_event)
+    if cancel_event is not None and cancel_event.is_set():
+        raise Cancelled()
     segments, info = model.transcribe(wav_path, language="th", word_timestamps=True, vad_filter=True)
     total = float(getattr(info, "duration", 0) or 0)
     tokens: list[Token] = []

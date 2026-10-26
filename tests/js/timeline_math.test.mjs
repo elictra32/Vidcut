@@ -100,3 +100,29 @@ test("dragEdgeToSource: edge dragged before time zero clamps to the first source
 test("dragEdgeToSource: start edge dragged into an earlier clip clamps to this clip's first keep", () => {
   close(tm.dragEdgeToSource(clipsFor("multi"), sub("c2", 1, 3), "start", 5), 0);
 });
+
+// ---- nextPlayTarget: what playback does when the loaded clip reaches a source time -------------
+test("nextPlayTarget: inside a kept segment keeps playing", () => {
+  assert.deepEqual(tm.nextPlayTarget(clipsFor("multi"), "c1", 5), { kind: "play" });
+  assert.deepEqual(tm.nextPlayTarget(clipsFor("multi"), "c2", 2), { kind: "play" });
+});
+
+test("nextPlayTarget: a gap inside the clip is skipped to the next keep", () => {
+  assert.deepEqual(tm.nextPlayTarget(clipsFor("multi"), "c1", 15), { kind: "seek", src: 20 });
+});
+
+test("nextPlayTarget: past the last keep hops to the next clip (also when the video has ended)", () => {
+  assert.deepEqual(tm.nextPlayTarget(clipsFor("multi"), "c1", 30), { kind: "clip", clipId: "c2", src: 0 });
+  assert.deepEqual(tm.nextPlayTarget(clipsFor("multi"), "c1", 100), { kind: "clip", clipId: "c2", src: 0 });
+});
+
+test("nextPlayTarget: the last clip's end stops playback", () => {
+  assert.deepEqual(tm.nextPlayTarget(clipsFor("multi"), "c2", 5), { kind: "end" });
+  assert.deepEqual(tm.nextPlayTarget(clipsFor("single"), "c1", 45), { kind: "end" });
+});
+
+test("nextPlayTarget: clips with nothing enabled are skipped", () => {
+  const clips = clipsFor("multi");
+  clips.splice(1, 0, { id: "mid", duration: 9, keeps: [{ start: 0, end: 9, enabled: false }] });
+  assert.deepEqual(tm.nextPlayTarget(clips, "c1", 31), { kind: "clip", clipId: "c2", src: 0 });
+});

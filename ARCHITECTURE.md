@@ -16,6 +16,7 @@ core/    pure logic, no web code, unit-tested          server/  thin FastAPI glu
   thai_split.py Whisper tokens -> Thai words -> subtitle lines
   transcribe.py faster-whisper wrapper; autosub.py selection -> Subtitle[]
   ass.py        ASS + SRT output; presets.py  TikTok/YouTube
+  fonts.py      bundled font list + CSS-size -> libass-Fontsize factor
   export.py     ffmpeg filter graph, run_export, render_preview_frame
 web/     one ES module per concern (state.js is the store; timeline_math.js mirrors core/timeline.py)
 fonts/   Sarabun + Prompt (SIL OFL), used by the browser preview AND the ffmpeg export
@@ -34,15 +35,28 @@ tests/   pytest (tests/), node tests (tests/js), Playwright smoke test (tests/e2
    same source content whenever keeps change (`remapSelection` / `updateKeeps` in the web code).
 3. **`Keep.enabled=false` = cut.** Dead-air gaps are the complement of the keeps; clicking a gap adds a keep for it.
 4. **Source files are never modified or copied.** Projects store paths. Browsers that can't play a file get a 480p proxy.
-5. **Export seeks per piece** (`-ss/-t -i` per selected piece, then `concat`) so a selection at minute 40 of a one-hour
-   file doesn't decode 40 minutes. ffmpeg runs with `cwd` = a temp dir and refers to `subs.ass`, `graph.txt` and
-   `fonts` by relative name, because absolute paths inside filter strings are a Windows escaping trap.
+5. **Export is frame-exact and batched.** Each selected piece is its own seeked input (`-ss/-t -i`), so a selection
+   at minute 40 of a one-hour file doesn't decode 40 minutes. Every piece is cut to a whole number of output frames
+   (30 fps) and `n*1600` audio samples, with boundaries rounded *cumulatively* from the exact edited times
+   (`frame_counts`); otherwise each cut leaves a frame or two and subtitles drift by seconds over a cut-heavy short.
+   More than `BATCH` (12) pieces are rendered in batches to scratch parts, then one pass joins them and burns the
+   subtitles: every input costs a decoder (~45 MB) and Windows caps a command line at 32k characters. Graphs are
+   passed inline (`-filter_complex`; `-filter_complex_script` is deprecated in FFmpeg 7+). ffmpeg runs with `cwd` =
+   a temp dir and refers to `subs.ass` and `fonts` by relative name (absolute paths inside filter strings are a Windows
+   escaping trap). Outputs never overwrite earlier ones (`name_tiktok.mp4`, `name_tiktok_2.mp4`, ...).
 6. **Preview vs export.** Subtitle x/y are fractions of the *export* frame (preset aspect). The preview draws them in
-   CSS (`web/stage.js`), the export in ASS (`core/ass.py`). Keep style -> CSS (`stage.js: style()`) and
-   style -> ASS (`ass.py: _style_line`) in step. "ตรวจเฟรมจริง" renders one real frame through the export graph.
-7. **Jobs and the project.** Long work (proxy, silence, transcribe, export) runs as a job. Jobs read a snapshot and
-   write results into the server's project under a lock. `PUT /api/project` is last-write-wins, so the UI flushes its
-   pending save *before* starting a job and re-fetches the project (`reloadAfterJob`) after it finishes.
+   CSS (`web/stage.js: style()`), the export in ASS (`core/ass.py: _style_line`). `style.size` is the CSS em size in
+   output pixels; libass `Fontsize` is the font's whole line height (OS/2 win ascent+descent), so
+   `core/fonts.py: ass_size_factor` converts it (Sarabun is 1.85x). A test compares libass against an independent
+   FreeType render. Every offered font must resolve in libass by its own name (tested). "ตรวจเฟรมจริง" renders one
+   real frame through the export graph.
+7. **Jobs and the project.** Long work (proxy, silence, transcribe, export) runs as a job; proxies get their own pool
+   so they never starve the rest. Jobs read a snapshot and write results into the server's project under a lock,
+   bumping `project.rev`. `PUT /api/project` is refused with 409 `project_stale` when its `rev` is old, and the page
+   reloads instead of overwriting a job's result. The server owns everything about the media (path, proxy, size,
+   duration) and clips only enter through `/api/clips`; the page owns keeps, framing, subtitles, style, selection.
+   The UI flushes its pending save *before* starting a job and re-fetches (`reloadAfterJob`) after it.
+   The server answers only to `127.0.0.1`/`localhost` Hosts and refuses cross-origin writes (DNS rebinding / CSRF).
 8. **Errors are Thai, with a fix.** Raise `AppError(code, message, hint, details)` or let `from_exception` map core
    exceptions; the UI shows message + hint and folds `details` away.
 
@@ -52,7 +66,8 @@ tests/   pytest (tests/), node tests (tests/js), Playwright smoke test (tests/e2
   injected fake Whisper model. Export tests need an ffmpeg with libass (skipped otherwise).
 - `node --test "tests/js/*.test.mjs"`: the JS time-mapping port, from the shared fixtures.
 - `tests/e2e/smoke.mjs`: real server + Chromium + fake Whisper through add clip -> silence -> select -> subtitles ->
-  edit -> export. Uses a WebM clip because Playwright's Chromium lacks H.264.
+  edit -> export. `multiclip.mjs`: playback continues across clips. Both use WebM (Playwright's Chromium lacks H.264)
+  and share `harness.mjs`.
 - The real-Whisper test is marked `slow` and needs a model download.
 
 ## Adding an LLM step later (typo fixing, bad-take removal)

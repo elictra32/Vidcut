@@ -20,7 +20,7 @@ SPEC = [("tone", 1), ("silence", 2), ("tone", 1)]
 def client(tmp_path, monkeypatch):
     monkeypatch.delenv("VIDCUT_PICK_OVERRIDE", raising=False)
     monkeypatch.delenv("VIDCUT_FAKE_WHISPER", raising=False)
-    return TestClient(create_app(home=str(tmp_path / "home")))
+    return TestClient(create_app(home=str(tmp_path / "home")), base_url="http://127.0.0.1:8765")
 
 
 def wait_job(client, job_id, timeout=90):
@@ -272,3 +272,112 @@ def test_export_result_reports_output_folder(client, tmp_path):
     put_project(client, selection={"start": 0, "end": 2})
     j = wait_job(client, client.post("/api/export", json={}).json()["job"])
     assert os.path.isdir(j["result"]["dir"]) and os.path.exists(os.path.join(j["result"]["dir"], j["result"]["mp4"]))
+
+
+
+# ---- review fixes: localhost hardening, stale saves, job safety --------------------------------
+def test_foreign_host_header_is_rejected(client):
+    """DNS rebinding: a page on evil.example resolving to 127.0.0.1 must not reach the API."""
+    r = client.get("/api/project", headers={"Host": "evil.example:8765"})
+    assert r.status_code == 400
+
+
+def test_cross_origin_post_is_rejected(client):
+    r = client.post("/api/clear-temp", headers={"Origin": "http://evil.example"})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "forbidden_origin"
+
+
+def test_same_origin_post_is_allowed(client):
+    assert client.post("/api/clear-temp", headers={"Origin": "http://127.0.0.1:8765"}).status_code == 200
+    assert client.post("/api/clear-temp", headers={"Origin": "http://localhost:8765"}).status_code == 200
+
+
+def test_put_cannot_repoint_a_clip_at_another_file(client, tmp_path):
+    src = make_clip(str(tmp_path / "a.mp4"), SPEC)
+    cid = add_clip(client, src)["clip"]["id"]
+    secret = tmp_path / "secret.txt"
+    secret.write_text("do not serve me")
+    p = get_project(client)
+    p["clips"][0].update(path=str(secret), proxy_path=str(secret), duration=1.0)
+    assert client.put("/api/project", json=p).status_code == 200
+    got = get_project(client)["clips"][0]
+    assert got["path"] == src and got["proxy_path"] is None and got["duration"] > 3
+    body = client.get(f"/media/{cid}").content
+    assert b"do not serve me" not in body and len(body) == os.path.getsize(src)
+
+
+def test_put_cannot_add_clips(client, tmp_path):
+    p = get_project(client)
+    p["clips"].append({"id": "evil", "path": str(tmp_path / "x"), "duration": 1, "width": 1, "height": 1,
+                       "fps": 25, "has_audio": True, "keeps": [], "proxy_path": None,
+                       "framing": {"mode": "blur_fit", "crop_center_x": 0.5}})
+    assert client.put("/api/project", json=p).status_code == 200
+    assert get_project(client)["clips"] == []
+
+
+def test_put_keeps_client_owned_fields(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "a.mp4"), SPEC))
+    p = get_project(client)
+    p["clips"][0]["keeps"] = [{"start": 0.5, "end": 1.5, "enabled": False}]
+    p["clips"][0]["framing"] = {"mode": "crop", "crop_center_x": 0.2}
+    p["subtitles"] = []
+    assert client.put("/api/project", json=p).status_code == 200
+    got = get_project(client)["clips"][0]
+    assert got["keeps"] == [{"start": 0.5, "end": 1.5, "enabled": False}] and got["framing"]["mode"] == "crop"
+
+
+def test_job_results_bump_rev_and_stale_put_is_rejected(client, tmp_path):
+    cid = add_clip(client, make_clip(str(tmp_path / "a.mp4"), SPEC))["clip"]["id"]
+    stale = get_project(client)
+    j = wait_job(client, client.post(f"/api/clips/{cid}/silence", json={}).json()["job"])
+    assert j["state"] == "done"
+    fresh = get_project(client)
+    assert fresh["rev"] > stale["rev"]
+    r = client.put("/api/project", json=stale)  # a page that never saw the job's result
+    assert r.status_code == 409 and r.json()["error"]["code"] == "project_stale"
+    assert get_project(client)["clips"][0]["keeps"] == fresh["clips"][0]["keeps"]
+    assert client.put("/api/project", json=fresh).status_code == 200
+
+
+def test_project_lists_the_offered_fonts(client):
+    from core.fonts import FONT_FILES
+    assert set(client.get("/api/project").json()["fonts"]) == set(FONT_FILES)
+
+
+def test_clear_temp_is_refused_while_a_job_runs(client):
+    release = threading.Event()
+    jid = client.app.state.st.jobs.submit(lambda progress, cancel: release.wait(10) and {}, "blocker")
+    for _ in range(100):
+        if client.app.state.st.jobs.get(jid)["state"] == "running":
+            break
+        time.sleep(0.02)
+    r = client.post("/api/clear-temp")
+    assert r.status_code == 409 and r.json()["error"]["code"] == "busy"
+    release.set()
+    wait_job(client, jid)
+    assert client.post("/api/clear-temp").status_code == 200
+
+
+def test_clear_temp_survives_a_file_it_cannot_delete(client, tmp_path, monkeypatch):
+    st = client.app.state.st
+    os.makedirs(st.proxies, exist_ok=True)
+    stuck = os.path.join(st.proxies, "stuck.mp4")
+    open(stuck, "wb").write(b"x")
+    real_remove = os.remove
+    monkeypatch.setattr(os, "remove", lambda p: (_ for _ in ()).throw(PermissionError("in use")) if p == os.path.abspath(stuck) else real_remove(p))
+    r = client.post("/api/clear-temp")
+    assert r.status_code == 200 and r.json()["skipped"] == 1
+
+
+def test_proxy_jobs_do_not_starve_other_jobs():
+    runner = JobRunner(workers=1, proxy_workers=1)
+    release = threading.Event()
+    slow = [runner.submit(lambda progress, cancel: release.wait(10) and {}, "proxy", pool="proxy") for _ in range(2)]
+    quick = runner.submit(lambda progress, cancel: {"ok": True}, "silence")
+    for _ in range(200):
+        if runner.get(quick)["state"] == "done":
+            break
+        time.sleep(0.01)
+    assert runner.get(quick)["state"] == "done"
+    assert runner.get(slow[1])["state"] == "queued"  # waits its turn, and says so
+    release.set()

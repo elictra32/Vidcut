@@ -115,3 +115,74 @@ def test_real_tiny_model_runs_on_synthetic_clip(tmp_path):
     p = make_clip(str(tmp_path / "t.mp4"), [("tone", 3)])
     c = clip("c1", p, [(0, 3)], duration=3)
     assert isinstance(generate_subtitles([c], Selection(0, 3), "tiktok", model_name="tiny"), list)
+
+
+# ---- model download: progress and cancel (spec section 5.4), downloader injected --------------------
+from core.transcribe import ensure_model  # noqa: E402
+
+FW_PATTERNS = ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"]
+
+
+def test_ensure_model_uses_the_cache_without_downloading():
+    calls = []
+
+    def dl(**kw):
+        calls.append(kw)
+        return "/cache/small"
+
+    assert ensure_model("small", snapshot_download=dl) == "/cache/small"
+    assert len(calls) == 1 and calls[0]["local_files_only"] is True
+    assert calls[0]["repo_id"] == "Systran/faster-whisper-small" and calls[0]["allow_patterns"] == FW_PATTERNS
+
+
+def test_ensure_model_downloads_and_reports_progress():
+    def dl(**kw):
+        if kw.get("local_files_only"):
+            raise RuntimeError("not cached")
+        files = kw["tqdm_class"](total=1000, unit="B")
+        for _ in range(4):
+            files.update(250)
+        return "/cache/large"
+
+    seen = []
+    assert ensure_model("large-v3", progress_cb=lambda p, m="": seen.append((p, m)), snapshot_download=dl) == "/cache/large"
+    fractions = [p for p, _ in seen]
+    assert fractions == sorted(fractions) and fractions[-1] == pytest.approx(1.0)
+    assert all("ดาวน์โหลด" in m for _, m in seen)
+
+
+def test_ensure_model_only_counts_byte_bars():
+    def dl(**kw):
+        if kw.get("local_files_only"):
+            raise RuntimeError("not cached")
+        kw["tqdm_class"](total=5, unit="it").update(5)  # the "fetching N files" bar
+        return "/cache/m"
+
+    seen = []
+    ensure_model("medium", progress_cb=lambda p, m="": seen.append(p), snapshot_download=dl)
+    assert seen == []
+
+
+def test_ensure_model_cancel_stops_the_download():
+    def dl(**kw):
+        if kw.get("local_files_only"):
+            raise RuntimeError("not cached")
+        kw["tqdm_class"](total=100, unit="B").update(10)
+        raise AssertionError("download should have been cancelled")
+
+    ev = threading.Event()
+    ev.set()
+    with pytest.raises(Cancelled):
+        ensure_model("small", cancel_event=ev, snapshot_download=dl)
+
+
+def test_model_dir_env_override(monkeypatch):
+    monkeypatch.setenv("VIDCUT_MODEL_DIR", "D:\\models")
+    got = {}
+
+    def dl(**kw):
+        got.update(kw)
+        return "x"
+
+    ensure_model("small", snapshot_download=dl)
+    assert got["cache_dir"] == "D:\\models"

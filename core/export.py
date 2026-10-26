@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,9 +17,12 @@ from core.models import Clip, Project, Selection
 from core.presets import PRESETS, Preset
 from core.timeline import Piece, edited_duration, selection_pieces, subtitles_for_export
 
-GRAPH_NAME = "graph.txt"
 FONTS_SRC = Path(__file__).resolve().parent.parent / "fonts"
 FPS = 30
+AUDIO_RATE = 48000
+SAMPLES_PER_FRAME = AUDIO_RATE // FPS  # 1600: audio is cut to whole frames so video and audio stay locked
+BATCH = 12  # pieces per ffmpeg pass: every piece is its own input/decoder (~45 MB each), and Windows caps argv at 32k
+_name_lock = threading.Lock()
 
 
 class ExportError(Exception):
@@ -37,55 +41,81 @@ def _fmt(x: float) -> str:
     return f"{x:.3f}".rstrip("0").rstrip(".") or "0"
 
 
-def _frame_chain(clip: Clip, W: int, H: int, tag: str) -> list[str]:
-    """Filter statements turning the raw input [in{tag}] into a WxH stream [v{tag}]."""
-    src = f"[{tag}:v]"
-    tail = f"fps={FPS},setsar=1,format=yuv420p"
+def frame_counts(pieces: list[Piece]) -> list[int]:
+    """Output frames for each piece. Boundaries are rounded cumulatively from the exact edited times,
+    so rounding never accumulates over many cuts (subtitles use the exact times)."""
+    if not pieces:
+        return []
+    last = pieces[-1]
+    bounds = [round(p.out_start * FPS) for p in pieces] + [round((last.out_start + last.src_end - last.src_start) * FPS)]
+    return [bounds[i + 1] - bounds[i] for i in range(len(pieces))]
+
+
+def _frame_chain(clip: Clip, W: int, H: int, tag: str, n_frames: int) -> list[str]:
+    """Statements turning input `tag` into a WxH stream [v{tag}] of exactly n_frames frames at FPS."""
+    # setpts first: after an input seek the first frame is not at 0, which would shift fps's frame grid
+    tail = (f"fps={FPS},tpad=stop=4:stop_mode=clone,trim=end_frame={n_frames},setpts=PTS-STARTPTS,"
+            f"setsar=1,format=yuv420p")
+    src = f"[r{tag}]"
+    head = [f"[{tag}:v]setpts=PTS-STARTPTS[r{tag}]"]
     if abs(clip.width / clip.height - W / H) < 0.01:
-        return [f"{src}scale={W}:{H},{tail}[v{tag}]"]
+        return head + [f"{src}scale={W}:{H},{tail}[v{tag}]"]
     if clip.framing.mode == "crop":
         cx = _fmt(min(1.0, max(0.0, clip.framing.crop_center_x)))
-        return [f"{src}scale={W}:{H}:force_original_aspect_ratio=increase,"
-                f"crop={W}:{H}:'(iw-ow)*{cx}':'(ih-oh)/2',{tail}[v{tag}]"]
-    return [f"{src}split[bg{tag}][fg{tag}]",
-            f"[bg{tag}]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=20:5[bb{tag}]",
-            f"[fg{tag}]scale={W}:{H}:force_original_aspect_ratio=decrease[ff{tag}]",
-            f"[bb{tag}][ff{tag}]overlay=(W-w)/2:(H-h)/2,{tail}[v{tag}]"]
+        return head + [f"{src}scale={W}:{H}:force_original_aspect_ratio=increase,"
+                       f"crop={W}:{H}:'(iw-ow)*{cx}':'(ih-oh)/2',{tail}[v{tag}]"]
+    return head + [f"{src}split[bg{tag}][fg{tag}]",
+                   f"[bg{tag}]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=20:5[bb{tag}]",
+                   f"[fg{tag}]scale={W}:{H}:force_original_aspect_ratio=decrease[ff{tag}]",
+                   f"[bb{tag}][ff{tag}]overlay=(W-w)/2:(H-h)/2,{tail}[v{tag}]"]
 
 
-def build_filter_graph(clips: list[Clip], pieces: list[Piece], preset: Preset, ass_name: str,
-                       include_audio: bool = True) -> str:
+def build_filter_graph(clips: list[Clip], pieces: list[Piece], preset: Preset, ass_name: str | None,
+                       include_audio: bool = True, frames: list[int] | None = None) -> str:
+    """Per-piece frame-exact video/audio, concatenated; subtitles burned in when `ass_name` is given.
+    Outputs are always [vout] and (with audio) [ac]."""
     by_id = {c.id: c for c in clips}
+    frames = frames if frames is not None else frame_counts(pieces)
     stmts, concat_in = [], ""
-    for i, p in enumerate(pieces):
+    for i, (p, n) in enumerate(zip(pieces, frames)):
         clip = by_id[p.clip_id]
-        stmts += _frame_chain(clip, preset.width, preset.height, str(i))
+        stmts += _frame_chain(clip, preset.width, preset.height, str(i), n)
         concat_in += f"[v{i}]"
         if include_audio:
+            samples = n * SAMPLES_PER_FRAME
             if clip.has_audio:
-                stmts.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo,"
-                             f"asetpts=PTS-STARTPTS[a{i}]")
+                stmts.append(f"[{i}:a]aresample={AUDIO_RATE},aformat=channel_layouts=stereo,asetpts=PTS-STARTPTS,"
+                             f"apad=pad_dur=0.15,atrim=end_sample={samples},asetpts=PTS-STARTPTS[a{i}]")
             else:
-                d = _fmt(p.src_end - p.src_start)
-                stmts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]")
+                stmts.append(f"anullsrc=r={AUDIO_RATE}:cl=stereo,atrim=end_sample={samples},asetpts=PTS-STARTPTS[a{i}]")
             concat_in += f"[a{i}]"
     a_flag, a_out = (1, "[ac]") if include_audio else (0, "")
-    stmts.append(f"{concat_in}concat=n={len(pieces)}:v=1:a={a_flag}[vc]{a_out}")
-    stmts.append(f"[vc]subtitles={ass_name}:fontsdir=fonts[vout]")
+    if ass_name:
+        stmts.append(f"{concat_in}concat=n={len(pieces)}:v=1:a={a_flag}[vc]{a_out}")
+        stmts.append(f"[vc]subtitles={ass_name}:fontsdir=fonts[vout]")
+    else:
+        stmts.append(f"{concat_in}concat=n={len(pieces)}:v=1:a={a_flag}[vout]{a_out}")
     return ";\n".join(stmts)
 
 
-def build_ffmpeg_cmd(clips: list[Clip], pieces: list[Piece], preset: Preset, ass_name: str,
-                     out_name: str, include_audio: bool = True, frame_only: bool = False) -> list[str]:
+def build_ffmpeg_cmd(clips: list[Clip], pieces: list[Piece], preset: Preset, ass_name: str | None,
+                     out_name: str, include_audio: bool = True, frame_only: bool = False,
+                     frames: list[int] | None = None, intermediate: bool = False) -> list[str]:
+    """ffmpeg argv (without the binary). One seeked input per piece; the graph is passed inline
+    (`-filter_complex_script` is deprecated in FFmpeg 7+)."""
     by_id = {c.id: c for c in clips}
     cmd: list[str] = []
     for p in pieces:
         cmd += ["-ss", _fmt(p.src_start), "-t", _fmt(p.src_end - p.src_start), "-i", by_id[p.clip_id].path]
-    cmd += ["-filter_complex_script", GRAPH_NAME, "-map", "[vout]"]
+    cmd += ["-filter_complex", build_filter_graph(clips, pieces, preset, ass_name, include_audio, frames),
+            "-map", "[vout]"]
     if include_audio:
         cmd += ["-map", "[ac]"]
     if frame_only:
         return cmd + ["-frames:v", "1", out_name]
+    if intermediate:  # near-lossless scratch part, joined and encoded for real in the final pass
+        return cmd + ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "14", "-pix_fmt", "yuv420p",
+                      "-c:a", "pcm_s16le", out_name]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
     if include_audio:
         cmd += ["-c:a", "aac", "-b:a", "160k"]
@@ -105,11 +135,9 @@ def _prepare(project: Project, selection: Selection):
     return preset, pieces, rendered
 
 
-def _workdir(preset: Preset, project: Project, rendered, pieces, **graph_kw) -> str:
+def _workdir(preset: Preset, project: Project, rendered) -> str:
     wd = tempfile.mkdtemp(prefix="vidcut_")
     Path(wd, "subs.ass").write_text(to_ass(rendered, project.style, (preset.width, preset.height)),
-                                    encoding="utf-8")
-    Path(wd, GRAPH_NAME).write_text(build_filter_graph(project.clips, pieces, preset, "subs.ass", **graph_kw),
                                     encoding="utf-8")
     shutil.copytree(FONTS_SRC, Path(wd, "fonts"))
     return wd
@@ -119,28 +147,76 @@ def _safe_stem(path: str) -> str:
     return re.sub(r'[<>:"/\\|?*\s]+', "_", Path(path).stem).strip("_") or "clip"
 
 
+def _plan(pieces: list[Piece]) -> tuple[list[Piece], list[int]]:
+    """Pieces with their output frame counts; pieces shorter than a frame are dropped."""
+    frames = frame_counts(pieces)
+    kept = [(p, n) for p, n in zip(pieces, frames) if n > 0]
+    return [p for p, _ in kept], [n for _, n in kept]
+
+
+def _ffmpeg(cmd, duration, progress_cb, cancel_event, wd):
+    try:
+        media.run_ffmpeg(cmd, duration, progress_cb, cancel_event, cwd=wd)
+    except FFmpegError as e:
+        raise ExportError("export_failed",
+                          "ส่งออกวิดีโอไม่สำเร็จ ลองลดช่วงที่เลือก หรือตรวจว่าไฟล์ต้นฉบับยังอยู่", e.details) from e
+    except FileNotFoundError as e:
+        if "ffmpeg" in str(e).lower():
+            raise ExportError("ffmpeg_missing", "ไม่พบ ffmpeg กรุณารัน setup.bat อีกครั้ง") from e
+        raise
+
+
+def _unique_paths(out_dir: str, stem: str) -> tuple[str, str]:
+    """First free <stem>[_N].mp4/.srt pair: an export never replaces an earlier one."""
+    n = 1
+    while True:
+        name = stem if n == 1 else f"{stem}_{n}"
+        mp4, srt = os.path.join(out_dir, name + ".mp4"), os.path.join(out_dir, name + ".srt")
+        if not os.path.exists(mp4) and not os.path.exists(srt):
+            return mp4, srt
+        n += 1
+
+
 def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=None) -> ExportResult:
     if not project.clips:
         raise ExportError("no_clips", "ยังไม่มีคลิปในโปรเจกต์ กรุณาเพิ่มคลิปก่อน")
     selection = project.selection or Selection(0.0, edited_duration(project.clips))
     preset, pieces, rendered = _prepare(project, selection)
-    duration = sum(p.src_end - p.src_start for p in pieces)
-    wd = _workdir(preset, project, rendered, pieces)
+    pieces, frames = _plan(pieces)
+    if not pieces:
+        raise ExportError("selection_invalid", "ช่วงที่เลือกสั้นเกินไป กรุณาเลือกช่วงที่ยาวกว่านี้")
+    report = progress_cb or (lambda p, m="": None)
+    wd = _workdir(preset, project, rendered)
     try:
-        cmd = build_ffmpeg_cmd(project.clips, pieces, preset, "subs.ass", "out.mp4")
-        try:
-            media.run_ffmpeg(cmd, duration, progress_cb, cancel_event, cwd=wd)
-        except FFmpegError as e:
-            raise ExportError("export_failed",
-                              "ส่งออกวิดีโอไม่สำเร็จ ลองลดช่วงที่เลือก หรือตรวจว่าไฟล์ต้นฉบับยังอยู่",
-                              e.details) from e
-        except FileNotFoundError as e:
-            raise ExportError("ffmpeg_missing", "ไม่พบ ffmpeg กรุณารัน setup.bat อีกครั้ง") from e
+        if len(pieces) <= BATCH:
+            cmd = build_ffmpeg_cmd(project.clips, pieces, preset, "subs.ass", "out.mp4", frames=frames)
+            _ffmpeg(cmd, sum(p.src_end - p.src_start for p in pieces), progress_cb, cancel_event, wd)
+        else:
+            # Bounded passes: each batch is rendered to a scratch part, then one pass joins the parts
+            # and burns the subtitles. Keeps memory and the command line small however many cuts there are.
+            spans = [(i, min(i + BATCH, len(pieces))) for i in range(0, len(pieces), BATCH)]
+            total = sum(p.src_end - p.src_start for p in pieces)
+            done = 0.0
+            for k, (i, j) in enumerate(spans):
+                part = pieces[i:j]
+                length = sum(p.src_end - p.src_start for p in part)
+                cmd = build_ffmpeg_cmd(project.clips, part, preset, None, f"part_{k}.mkv", frames=frames[i:j],
+                                       intermediate=True)
+                base = done
+                _ffmpeg(cmd, length, lambda f, m="", base=base, length=length: report(0.8 * (base + f * length) / total, m),
+                        cancel_event, wd)
+                done += length
+            Path(wd, "parts.txt").write_text("".join(f"file 'part_{k}.mkv'\n" for k in range(len(spans))),
+                                             encoding="utf-8")
+            final = ["-f", "concat", "-safe", "0", "-i", "parts.txt", "-vf", "subtitles=subs.ass:fontsdir=fonts",
+                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "out.mp4"]
+            _ffmpeg(final, total, lambda f, m="": report(0.8 + 0.2 * f, m), cancel_event, wd)
         os.makedirs(out_dir, exist_ok=True)
-        stem = f"{_safe_stem(project.clips[0].path)}_{preset.name}"
-        mp4, srt = os.path.join(out_dir, stem + ".mp4"), os.path.join(out_dir, stem + ".srt")
-        shutil.move(os.path.join(wd, "out.mp4"), mp4)
-        Path(srt).write_text(to_srt(rendered), encoding="utf-8")
+        with _name_lock:
+            mp4, srt = _unique_paths(out_dir, f"{_safe_stem(project.clips[0].path)}_{preset.name}")
+            shutil.move(os.path.join(wd, "out.mp4"), mp4)
+            Path(srt).write_text(to_srt(rendered), encoding="utf-8")
         return ExportResult(mp4, srt)
     finally:
         shutil.rmtree(wd, ignore_errors=True)
@@ -151,10 +227,11 @@ def render_preview_frame(project: Project, edited_t: float, out_png: str) -> Non
     total = edited_duration(project.clips)
     t = min(max(0.0, edited_t), max(0.0, total - 0.1))
     preset, pieces, rendered = _prepare(project, Selection(t, min(total, t + 0.1)))
-    wd = _workdir(preset, project, rendered, pieces, include_audio=False)
+    pieces, frames = _plan(pieces)
+    wd = _workdir(preset, project, rendered)
     try:
         cmd = build_ffmpeg_cmd(project.clips, pieces, preset, "subs.ass", "frame.png",
-                               include_audio=False, frame_only=True)
+                               include_audio=False, frame_only=True, frames=frames)
         try:
             media.run_ffmpeg(cmd, cwd=wd)
         except FFmpegError as e:

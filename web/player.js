@@ -14,7 +14,7 @@ let stopAt = null;
 let editedTime = 0;
 
 export const onTime = (fn) => (timeListeners.add(fn), () => timeListeners.delete(fn));
-export const isPlaying = () => !video.paused;
+export const isPlaying = () => wantPlay;
 export const getTime = () => editedTime;
 export const getLoadedClipId = () => loadedClipId;
 export const getSourceTime = () => video.currentTime;
@@ -68,33 +68,28 @@ export async function showClip(clipId) {
   emit();
 }
 
-function nextClipStart(p, clipId) {
-  const i = p.clips.findIndex((c) => c.id === clipId);
-  for (const c of p.clips.slice(i + 1)) {
-    const k = tm.enabledKeeps(c)[0];
-    if (k) return [c.id, k.start];
+let wantPlay = false; // the user asked for playback; <video> flips to paused by itself at the end of a file
+
+/** Apply tm.nextPlayTarget: skip gaps, hop clips, or stop. Returns false when playback ended. */
+async function advance() {
+  const p = getProject();
+  const target = tm.nextPlayTarget(p.clips, loadedClipId, video.currentTime);
+  if (target.kind === "seek") video.currentTime = target.src;
+  else if (target.kind === "clip") {
+    await loadClip(target.clipId, target.src);
+    await video.play().catch(() => {});
+  } else if (target.kind === "end") {
+    pause();
+    editedTime = tm.editedDuration(p.clips);
+    return false;
   }
-  return null;
+  return true;
 }
 
 async function tick() {
   const p = getProject();
-  if (video.paused || !p) return;
-  const clip = p.clips.find((c) => c.id === loadedClipId);
-  const keeps = clip ? tm.enabledKeeps(clip) : [];
-  const t = video.currentTime;
-  if (!keeps.some((k) => t >= k.start - 0.03 && t < k.end)) {
-    const next = keeps.find((k) => k.start > t);
-    if (next) video.currentTime = next.start;
-    else {
-      const nc = nextClipStart(p, loadedClipId);
-      if (nc) await loadClip(nc[0], nc[1]), video.play();
-      else {
-        pause();
-        editedTime = tm.editedDuration(p.clips);
-      }
-    }
-  }
+  if (!wantPlay || !p) return;
+  if (!(await advance())) return;
   emit();
   if (stopAt !== null && editedTime >= stopAt) {
     pause();
@@ -109,6 +104,7 @@ export async function play(until = null) {
   stopAt = until;
   if (!loadedClipId) await seek(editedTime);
   if (editedTime >= tm.editedDuration(p.clips) - 0.05) await seek(0);
+  wantPlay = true;
   await video.play().catch(() => {});
   cancelAnimationFrame(raf);
   raf = requestAnimationFrame(tick);
@@ -116,6 +112,7 @@ export async function play(until = null) {
 }
 
 export function pause() {
+  wantPlay = false;
   video.pause();
   cancelAnimationFrame(raf);
   stopAt = null;
@@ -132,7 +129,15 @@ export async function playSelection() {
 }
 
 video.addEventListener("seeked", emit);
-video.addEventListener("ended", () => !stopAt && pause());
+// A file that ends exactly at its last kept moment never produces a frame outside a keep, so the
+// playback loop alone can't see it: 'ended' pauses the <video>, and we must move on to the next clip.
+video.addEventListener("ended", async () => {
+  if (!wantPlay) return;
+  if (await advance()) {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(tick);
+  }
+});
 
 // The loaded clip may have been removed, or its proxy may have just become available.
 subscribe((why) => {
