@@ -33,3 +33,16 @@ def test_run_bat_starts_the_server_from_the_venv():
 def test_docs_exist():
     for name in ("README.md", "ARCHITECTURE.md"):
         assert (ROOT / name).stat().st_size > 1500, name
+
+
+def test_setup_bat_refreshes_path_after_installing_ffmpeg():
+    """winget changes PATH for NEW shells only; setup must re-read it instead of reporting a failed install."""
+    s = bat("setup.bat").decode("utf-8")
+    assert ":refreshpath" in s and r'HKCU\Environment' in s and r"WinGet\Links" in s
+    install = s.index("winget install --id Gyan.FFmpeg -e --accept")
+    assert "call :refreshpath" in s[install:s.index("where ffmpeg", install)]
+
+
+def test_run_bat_refreshes_path_before_starting():
+    s = bat("run.bat").decode("utf-8")
+    assert ":refreshpath" in s and s.index("call :refreshpath") < s.index("-m server.app")

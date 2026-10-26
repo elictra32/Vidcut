@@ -3,6 +3,7 @@ setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
 title Vidcut - ติดตั้ง
+call :refreshpath
 
 echo.
 echo ===== Vidcut setup =====
@@ -28,6 +29,7 @@ where ffmpeg >nul 2>&1
 if errorlevel 1 (
   echo กำลังติดตั้ง ffmpeg ด้วย winget ...
   winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements
+  call :refreshpath
 )
 where ffmpeg >nul 2>&1
 if errorlevel 1 (
@@ -65,3 +67,11 @@ echo.
 echo การติดตั้งไม่สำเร็จ ดูข้อความด้านบน หรืออ่าน README.md หัวข้อ แก้ปัญหา
 pause
 exit /b 1
+
+:refreshpath
+rem winget changes PATH for new shells only. Re-read the user PATH from the registry and add winget's
+rem Links folder, so a tool installed a moment ago is found without reopening this window.
+set "USRPATH="
+for /f "tokens=2,*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul') do set "USRPATH=%%B"
+call set "PATH=%PATH%;%USRPATH%;%LOCALAPPDATA%\Microsoft\WinGet\Links"
+exit /b 0
