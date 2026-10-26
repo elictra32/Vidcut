@@ -8,7 +8,7 @@ import { $ } from "./util.js";
 
 const stage = $("#stage");
 const frame = $("#frame");
-const video = $("#video");
+const videos = [...document.querySelectorAll("#frame video")]; // two: see player.js
 const overlay = $("#sub-overlay");
 const safeZone = $("#safe-zone");
 const nodes = new Map(); // subtitle id -> element
@@ -28,11 +28,9 @@ function layout() {
   const clip = p?.clips.find((c) => c.id === (player.getLoadedClipId() ?? ui.currentClipId));
   const sameAspect = clip && Math.abs(clip.width / clip.height - pr.width / pr.height) < 0.01;
   if (clip && clip.framing.mode === "crop" && !sameAspect) {
-    video.style.objectFit = "cover";
-    video.style.objectPosition = `${clip.framing.crop_center_x * 100}% 50%`;
+    for (const v of videos) Object.assign(v.style, { objectFit: "cover", objectPosition: `${clip.framing.crop_center_x * 100}% 50%` });
   } else {
-    video.style.objectFit = "contain";
-    video.style.objectPosition = "50% 50%";
+    for (const v of videos) Object.assign(v.style, { objectFit: "contain", objectPosition: "50% 50%" });
   }
   const sz = getPresets()[p?.preset]?.safe_zone;
   safeZone.style.display = ui.showSafeZone && sz ? "block" : "none";
@@ -149,5 +147,5 @@ export function initStage() {
   subscribe(layout);
   player.onTime(render);
   new ResizeObserver(layout).observe(stage);
-  video.addEventListener("loadedmetadata", layout);
+  for (const v of videos) v.addEventListener("loadedmetadata", layout);
 }

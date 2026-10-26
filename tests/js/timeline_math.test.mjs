@@ -133,3 +133,24 @@ test("nextPlayTarget never hops into an intro or outro clip", () => {
   assert.deepEqual(tm.nextPlayTarget(clips, "c1", 31), { kind: "end" });
   assert.deepEqual(tm.nextPlayTarget(clips, "c1", 15), { kind: "seek", src: 20 });
 });
+
+// ---- upcomingBoundary: when the current kept segment ends and what playback does next ----------------
+test("upcomingBoundary: the end of the current keep and where playback goes after it", () => {
+  assert.deepEqual(tm.upcomingBoundary(clipsFor("multi"), "c1", 5), { at: 10, target: { kind: "seek", src: 20 } });
+  assert.deepEqual(tm.upcomingBoundary(clipsFor("multi"), "c1", 25), { at: 30, target: { kind: "clip", clipId: "c2", src: 0 } });
+  assert.deepEqual(tm.upcomingBoundary(clipsFor("multi"), "c2", 2), { at: 5, target: { kind: "end" } });
+});
+
+test("upcomingBoundary: not inside a kept segment means there is nothing to prepare", () => {
+  assert.equal(tm.upcomingBoundary(clipsFor("single"), "c1", 15), null);
+});
+
+test("upcomingBoundary: touching keeps continue without a jump", () => {
+  const clips = clipsFor("single");
+  clips[0].keeps = [{ start: 0, end: 10, enabled: true }, { start: 10, end: 20, enabled: true }];
+  assert.deepEqual(tm.upcomingBoundary(clips, "c1", 5), { at: 10, target: { kind: "play" } });
+});
+
+test("upcomingBoundary skips intro/outro clips like nextPlayTarget does", () => {
+  assert.deepEqual(tm.upcomingBoundary(clipsFor("roles"), "c1", 25), { at: 30, target: { kind: "end" } });
+});

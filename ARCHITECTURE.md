@@ -71,6 +71,14 @@ tests/   pytest (tests/), node tests (tests/js), Playwright smoke test (tests/e2
   and share `harness.mjs`.
 - The real-Whisper test is marked `slow` and needs a model download.
 
+## Smooth preview across cuts
+
+`web/player.js` drives two `<video>` elements. Seeking the visible one over a removed gap freezes the picture while the
+browser decodes to a keyframe (about 1 s on long-GOP 1080p). While one plays, the hidden one pre-seeks the next kept
+position (`tm.upcomingBoundary` says when the cut comes and where it goes); they swap about a frame before the cut. If
+the hidden one isn't ready in time, playback falls back to the plain seek. `tests/e2e/smooth.mjs` records every presented
+frame and compares the worst gap with and without cuts (here ~1,050 ms before, 133 ms after, against 67 ms of normal jitter).
+
 ## Intro / outro clips and export options
 
 `Clip.role` is `main`, `intro` or `outro`. Only `main` clips are on the edit timeline (`core/timeline.py` and its JS

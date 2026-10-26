@@ -16,11 +16,12 @@ export const must = (cond, msg) => { if (!cond) throw new Error("ASSERT: " + msg
 const freePort = () => new Promise((res) => { const s = createServer().listen(0, () => { const p = s.address().port; s.close(() => res(p)); }); });
 
 /** A WebM (VP8/Opus: Playwright's Chromium has no H.264). `pattern` = aevalsrc expression for the audio. */
-export function makeWebm(path, seconds, pattern = "sin(2*PI*440*t)") {
+export function makeWebm(path, seconds, pattern = "sin(2*PI*440*t)", { size = "640x360", gop = 25, kbps = 300 } = {}) {
   const r = spawnSync("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error",
-    "-f", "lavfi", "-i", `testsrc=size=640x360:rate=25:duration=${seconds}`,
+    "-f", "lavfi", "-i", `testsrc2=size=${size}:rate=25:duration=${seconds}`,
     "-f", "lavfi", "-i", `aevalsrc=${pattern}:s=48000:d=${seconds}`,
-    "-c:v", "libvpx", "-b:v", "300k", "-c:a", "libopus", "-shortest", path]);
+    "-c:v", "libvpx", "-b:v", `${kbps}k`, "-g", String(gop), "-cpu-used", "8", "-deadline", "realtime",
+    "-c:a", "libopus", "-shortest", path]);
   if (r.status !== 0) throw new Error("could not generate a test clip: " + r.stderr);
 }
 

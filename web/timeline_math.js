@@ -150,3 +150,14 @@ export function nextPlayTarget(clips, clipId, t) {
   }
   return { kind: "end" };
 }
+
+/**
+ * While playing at source time `t` of `clipId`: when the current kept segment ends (`at`, source
+ * seconds) and what playback does then (same shape as nextPlayTarget). Null when `t` is not inside a
+ * kept segment. The player uses it to prepare the next position before the cut arrives.
+ */
+export function upcomingBoundary(clips, clipId, t) {
+  const clip = clips.find((c) => c.id === clipId);
+  const keep = clip && enabledKeeps(clip).find((k) => t >= k.start - 0.03 && t < k.end);
+  return keep ? { at: keep.end, target: nextPlayTarget(clips, clipId, keep.end) } : null;
+}

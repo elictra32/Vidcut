@@ -1,17 +1,27 @@
-// Plays the project in EDITED time: the <video> shows one clip at a time and playback
-// skips over disabled keeps / dead-air gaps, jumping to the next clip when one ends.
+// Plays the project in EDITED time: playback skips over disabled keeps / dead-air gaps and hops to the
+// next clip when one ends.
+//
+// Two <video> elements take turns. Seeking the visible one across a cut freezes the picture while the
+// browser decodes up to the next keyframe (a second or more on long-GOP phone footage). So while one
+// plays, the other (hidden) pre-seeks the next kept position; at the cut they swap.
 import { getProject, subscribe, ui, setCurrentClip } from "./state.js";
 import * as tm from "./timeline_math.js";
 import { showError } from "./toast.js";
-import { $ } from "./util.js";
 
-const video = $("#video");
+const LOOKAHEAD = 2.0; // seconds before a cut at which the hidden video starts preparing
+const SWITCH_AT = 0.04; // swap when this close to the cut (about one frame)
+
+const videos = [document.getElementById("video"), document.getElementById("video2")];
+let video = videos[0]; // the visible one
+let standby = videos[1]; // hidden, preparing the next position
+let standbyPrep = null; // { key, clipId, src, ready }
 const timeListeners = new Set();
 let loadedClipId = null;
 let loadedVersion = null;
 let raf = 0;
 let stopAt = null;
 let editedTime = 0;
+let wantPlay = false; // the user asked for playback; a <video> pauses by itself at the end of a file
 
 export const onTime = (fn) => (timeListeners.add(fn), () => timeListeners.delete(fn));
 export const isPlaying = () => wantPlay;
@@ -26,24 +36,43 @@ function emit() {
   timeListeners.forEach((f) => f(editedTime));
 }
 
-async function loadClip(clipId, atSrc = 0) {
+/** Point `el` at a clip and a source time; resolves once it shows that frame. */
+async function load(el, clipId, atSrc) {
   const clip = getProject().clips.find((c) => c.id === clipId);
   if (!clip) return false;
   const version = clip.proxy_path ? 1 : 0;
-  if (loadedClipId !== clipId || loadedVersion !== version) {
-    loadedClipId = clipId;
-    loadedVersion = version;
-    video.src = `/media/${clipId}?p=${version}`;
+  if (el._clipId !== clipId || el._version !== version) {
+    el._clipId = clipId;
+    el._version = version;
+    el.src = `/media/${clipId}?p=${version}`;
     await new Promise((resolve) => {
-      video.addEventListener("loadedmetadata", resolve, { once: true });
-      video.addEventListener("error", () => {
-        showError({ payload: { message: "เล่นวิดีโอนี้ในเบราว์เซอร์ไม่ได้",
-          hint: "ถ้าเป็นไฟล์ HEVC/MKV ให้รอสร้างไฟล์พรีวิวให้เสร็จก่อน" } });
+      el.addEventListener("loadedmetadata", resolve, { once: true });
+      el.addEventListener("error", () => {
+        if (el === video) {
+          showError({ payload: { message: "เล่นวิดีโอนี้ในเบราว์เซอร์ไม่ได้",
+            hint: "ถ้าเป็นไฟล์ HEVC/MKV ให้รอสร้างไฟล์พรีวิวให้เสร็จก่อน" } });
+        }
         resolve();
       }, { once: true });
     });
   }
-  video.currentTime = atSrc;
+  if (Math.abs(el.currentTime - atSrc) > 0.01) {
+    await new Promise((resolve) => {
+      const done = () => (el.removeEventListener("seeked", done), clearTimeout(timer), resolve());
+      const timer = setTimeout(done, 3000); // never wait forever on a stalled seek
+      el.addEventListener("seeked", done);
+      el.currentTime = atSrc;
+    });
+  }
+  return true;
+}
+
+async function loadClip(clipId, atSrc = 0) {
+  standbyPrep = null; // whatever was prepared no longer matches
+  const ok = await load(video, clipId, atSrc);
+  if (!ok) return false;
+  loadedClipId = clipId;
+  loadedVersion = video._version;
   if (ui.currentClipId !== clipId) setCurrentClip(clipId);
   return true;
 }
@@ -68,8 +97,6 @@ export async function showClip(clipId) {
   emit();
 }
 
-let wantPlay = false; // the user asked for playback; <video> flips to paused by itself at the end of a file
-
 /** Apply tm.nextPlayTarget: skip gaps, hop clips, or stop. Returns false when playback ended. */
 async function advance() {
   const p = getProject();
@@ -86,10 +113,50 @@ async function advance() {
   return true;
 }
 
+const prepKey = (target) => `${target.kind === "clip" ? target.clipId : loadedClipId}@${target.src}`;
+
+/** Have the hidden video show the position playback is about to jump to. */
+function prepare(target) {
+  const key = prepKey(target);
+  if (standbyPrep?.key === key) return;
+  const clipId = target.kind === "clip" ? target.clipId : loadedClipId;
+  const mine = (standbyPrep = { key, clipId, src: target.src, ready: false });
+  standby.pause();
+  load(standby, clipId, target.src).then((ok) => {
+    if (ok && standbyPrep === mine) mine.ready = true;
+  });
+}
+
+/** Make the prepared video the visible, playing one. False when it isn't ready (caller falls back to seeking). */
+function swapIfReady(target) {
+  if (!standbyPrep?.ready || standbyPrep.key !== prepKey(target)) return false;
+  const next = standby;
+  const prev = video;
+  next.play().catch(() => {});
+  next.classList.remove("standby");
+  prev.classList.add("standby");
+  prev.pause();
+  video = next;
+  standby = prev;
+  standbyPrep = null;
+  const changed = loadedClipId !== video._clipId;
+  loadedClipId = video._clipId;
+  loadedVersion = video._version;
+  if (changed && ui.currentClipId !== loadedClipId) setCurrentClip(loadedClipId);
+  return true;
+}
+
 async function tick() {
   const p = getProject();
   if (!wantPlay || !p) return;
-  if (!(await advance())) return;
+  let swapped = false;
+  const b = tm.upcomingBoundary(p.clips, loadedClipId, video.currentTime);
+  if (b && (b.target.kind === "seek" || b.target.kind === "clip")) {
+    const remaining = b.at - video.currentTime;
+    if (remaining <= LOOKAHEAD) prepare(b.target);
+    if (remaining <= SWITCH_AT) swapped = swapIfReady(b.target);
+  }
+  if (!swapped && !(await advance())) return;
   emit();
   if (stopAt !== null && editedTime >= stopAt) {
     pause();
@@ -114,7 +181,7 @@ export async function play(until = null) {
 
 export function pause() {
   wantPlay = false;
-  video.pause();
+  for (const v of videos) v.pause();
   cancelAnimationFrame(raf);
   stopAt = null;
   emit();
@@ -129,25 +196,33 @@ export async function playSelection() {
   await play(sel.end);
 }
 
-video.addEventListener("seeked", emit);
-// A file that ends exactly at its last kept moment never produces a frame outside a keep, so the
-// playback loop alone can't see it: 'ended' pauses the <video>, and we must move on to the next clip.
-video.addEventListener("ended", async () => {
-  if (!wantPlay) return;
-  if (await advance()) {
-    cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(tick);
-  }
-});
+for (const v of videos) {
+  v.addEventListener("seeked", () => v === video && emit());
+  // A file that ends exactly at its last kept moment never produces a frame outside a keep, so the
+  // playback loop alone can't see it: 'ended' pauses the <video>, and we must move on to the next clip.
+  v.addEventListener("ended", async () => {
+    if (v !== video || !wantPlay) return;
+    if (await advance()) {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(tick);
+    }
+  });
+}
 
-// The loaded clip may have been removed, or its proxy may have just become available.
+// A loaded clip may have been removed, or its proxy may have just become available.
 subscribe((why) => {
   const p = getProject();
   if (why !== "load" || !p) return;
+  standbyPrep = null;
+  for (const v of videos) {
+    if (v._clipId && !p.clips.some((c) => c.id === v._clipId)) {
+      if (v === video) pause();
+      v.removeAttribute("src");
+      v.load();
+      v._clipId = v._version = null;
+    }
+  }
   if (loadedClipId && !p.clips.some((c) => c.id === loadedClipId)) {
-    pause();
-    video.removeAttribute("src");
-    video.load();
     loadedClipId = null;
     loadedVersion = null;
   }
