@@ -1,3 +1,6 @@
+@font-face { font-family: "Sarabun"; src: url("/fonts/Sarabun-Regular.ttf"); font-display: swap; }
+@font-face { font-family: "Prompt"; src: url("/fonts/Prompt-Medium.ttf"); font-display: swap; }
+
 :root {
   --bg: #121418;
   --panel: #1b1e25;
@@ -16,6 +19,9 @@
   --select: #f5b84b;
   --select-fill: rgba(245, 184, 75, 0.12);
   --playhead: #ffffff;
+  --lane: #181b22;
+  --sub: #343b52;
+  --sub-sel: #4a5580;
   --radius: 8px;
   font-family: "Leelawadee UI", "Sarabun", "Noto Sans Thai", system-ui, sans-serif;
   color-scheme: dark;
@@ -65,7 +71,12 @@ input, select {
 
 .center { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
 .stage { position: relative; flex: 1; min-height: 0; background: #000; border-radius: var(--radius); display: grid; place-items: center; overflow: hidden; }
-.stage video { width: 100%; height: 100%; object-fit: contain; }
+#frame { position: relative; background: #000; overflow: hidden; flex: none; outline: 1px solid var(--border); }
+#frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+#sub-overlay { position: absolute; inset: 0; pointer-events: none; }
+.sub { position: absolute; transform: translate(-50%, -50%); white-space: pre; text-align: center; line-height: 1.25;
+  pointer-events: auto; cursor: move; touch-action: none; user-select: none; border-radius: 4px; }
+.sub.selected { outline: 1px dashed var(--accent); outline-offset: 4px; }
 .transport { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .clock { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 110px; }
 .sel-info { color: var(--select); font-size: 12px; }
@@ -89,3 +100,17 @@ input, select {
   .right .panel { flex: 1; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.field.inline { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.field.inline span { flex: 1; }
+input[type="color"] { padding: 0; width: 38px; height: 26px; }
+input[type="range"] { padding: 0; accent-color: var(--accent); }
+output { color: var(--text); }
+textarea { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; resize: vertical; min-width: 0; width: 100%; }
+.sub-list { display: grid; gap: 6px; max-height: 38vh; overflow: auto; }
+.sub-row { display: grid; grid-template-columns: 52px 1fr 28px; gap: 6px; align-items: start; border: 1px solid transparent; border-radius: 6px; padding: 4px; }
+.sub-row.selected { border-color: var(--accent); }
+.sub-row .time { font-variant-numeric: tabular-nums; font-size: 12px; padding: 4px; }
+.sub-row .small { grid-column: 2 / -1; }
+.sub-row.hidden-sub textarea { opacity: 0.55; }

@@ -3,6 +3,7 @@ import { showError } from "./toast.js";
 import { remapSelection } from "./timeline_math.js";
 
 let project = null;
+let presets = {};
 let saveTimer = null;
 let dirty = false;
 const listeners = new Set();
@@ -11,11 +12,14 @@ const listeners = new Set();
 export const ui = { currentClipId: null, selectedSubId: null };
 
 export const getProject = () => project;
+export const getPresets = () => presets;
 export const subscribe = (fn) => (listeners.add(fn), () => listeners.delete(fn));
 const notify = (why) => listeners.forEach((f) => f(why));
 
 export async function loadProject() {
-  project = (await api("GET", "/api/project")).project;
+  const r = await api("GET", "/api/project");
+  project = r.project;
+  presets = r.presets ?? {};
   if (!project.clips.some((c) => c.id === ui.currentClipId)) ui.currentClipId = project.clips[0]?.id ?? null;
   notify("load");
 }
@@ -62,4 +66,9 @@ export async function reloadAfterJob(keepSelectionFrom = null) {
 export function setCurrentClip(id) {
   ui.currentClipId = id;
   notify("clip");
+}
+
+export function setSelectedSub(id) {
+  ui.selectedSubId = id;
+  notify("select");
 }

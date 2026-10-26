@@ -31,6 +31,7 @@ from server.project_store import default_home, load_project, save_project
 
 HOST = "127.0.0.1"
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+FONTS_DIR = Path(__file__).resolve().parent.parent / "fonts"
 TEMP_PREFIXES = ("vidcut_",)
 
 
@@ -94,7 +95,8 @@ def create_app(home: str | None = None) -> FastAPI:
     @app.get("/api/project")
     def get_project():
         with st.lock:
-            return {"project": project_to_dict(st.project)}
+            return {"project": project_to_dict(st.project),
+                    "presets": {k: asdict(v) for k, v in PRESETS.items()}}
 
     @app.put("/api/project")
     def put_project(body: dict):
@@ -194,6 +196,7 @@ def create_app(home: str | None = None) -> FastAPI:
         factory = fake_whisper.factory if os.environ.get("VIDCUT_FAKE_WHISPER") == "1" else None
 
         def work(progress, cancel):
+            progress(0.0, "กำลังเตรียมเสียงและโหลดโมเดล (ครั้งแรกต้องดาวน์โหลด)")
             subs = generate_subtitles(snap.clips, snap.selection, snap.preset, model, progress, cancel, factory)
             with st.lock:
                 st.project.subtitles = subs
@@ -265,6 +268,8 @@ def create_app(home: str | None = None) -> FastAPI:
                 shutil.rmtree(os.path.join(tmp, d), ignore_errors=True)
         return {"freed_bytes": freed}
 
+    if FONTS_DIR.is_dir():  # bundled Thai fonts, so the browser preview matches the export
+        app.mount("/fonts", StaticFiles(directory=str(FONTS_DIR)), name="fonts")
     if WEB_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
     return app

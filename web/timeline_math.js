@@ -107,3 +107,26 @@ export function remapSelection(oldClips, newClips, sel) {
   if (start === null || end === null || end - start < 0.05) return null;
   return { start, end };
 }
+
+const MIN_SUB = 0.1;
+
+/**
+ * Dragging a subtitle edge to edited time `t` -> its new source anchor. An edge dragged into
+ * a different clip clamps to this clip's nearest keep boundary; edges never cross.
+ */
+export function dragEdgeToSource(clips, sub, which, t) {
+  const clip = clips.find((c) => c.id === sub.clip_id);
+  const keeps = enabledKeeps(clip);
+  const current = which === "start" ? sub.src_start : sub.src_end;
+  if (!keeps.length) return current;
+  const hit = which === "start" ? editedToSource(clips, t) : editedEndToSource(clips, t);
+  let src = current;
+  if (hit) {
+    if (hit[0] === clip.id) src = hit[1];
+    else {
+      const order = clips.map((c) => c.id);
+      src = order.indexOf(hit[0]) < order.indexOf(clip.id) ? keeps[0].start : keeps[keeps.length - 1].end;
+    }
+  }
+  return which === "start" ? Math.min(src, sub.src_end - MIN_SUB) : Math.max(src, sub.src_start + MIN_SUB);
+}

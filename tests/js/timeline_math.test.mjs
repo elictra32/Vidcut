@@ -77,3 +77,26 @@ test("remapSelection returns null when nothing is left", () => {
 test("remapSelection passes null through", () => {
   assert.equal(tm.remapSelection(clipsFor("single"), clipsFor("single"), null), null);
 });
+
+// ---- dragEdgeToSource: dragging a subtitle edge on the edited timeline -> source anchor ----
+const sub = (clip_id, src_start, src_end) => ({ clip_id, src_start, src_end });
+
+test("dragEdgeToSource: start edge cannot cross the end edge (min length 0.1 s)", () => {
+  close(tm.dragEdgeToSource(clipsFor("single"), sub("c1", 5, 8), "start", 12), 7.9);
+});
+
+test("dragEdgeToSource: end edge dragged past a cut lands in the later keep", () => {
+  close(tm.dragEdgeToSource(clipsFor("single"), sub("c1", 5, 8), "end", 12), 22);
+});
+
+test("dragEdgeToSource: edge dragged into another clip clamps to this clip's last keep end", () => {
+  close(tm.dragEdgeToSource(clipsFor("multi"), sub("c1", 5, 8), "end", 22), 30);
+});
+
+test("dragEdgeToSource: edge dragged before time zero clamps to the first source moment", () => {
+  close(tm.dragEdgeToSource(clipsFor("single"), sub("c1", 25, 28), "start", -5), 0);
+});
+
+test("dragEdgeToSource: start edge dragged into an earlier clip clamps to this clip's first keep", () => {
+  close(tm.dragEdgeToSource(clipsFor("multi"), sub("c2", 1, 3), "start", 5), 0);
+});

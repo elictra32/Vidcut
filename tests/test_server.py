@@ -230,3 +230,17 @@ def test_server_binds_localhost_only(monkeypatch, tmp_path):
     monkeypatch.setenv("VIDCUT_HOME", str(tmp_path))
     app_module.run_server(port=4321)
     assert captured["host"] == "127.0.0.1" and captured["port"] == 4321
+
+
+def test_project_includes_presets_with_safe_zones(client):
+    presets = client.get("/api/project").json()["presets"]
+    assert presets["tiktok"]["width"] == 1080 and presets["tiktok"]["height"] == 1920
+    assert presets["youtube"]["width"] == 1920
+    assert set(presets["tiktok"]["safe_zone"]) == {"top", "bottom", "left", "right"}
+    assert presets["tiktok"]["style_overrides"] == {"size": 72, "default_y": 0.70}
+
+
+def test_bundled_fonts_are_served_for_the_preview(client):
+    r = client.get("/fonts/Sarabun-Regular.ttf")
+    assert r.status_code == 200 and len(r.content) > 10000
+    assert client.get("/fonts/nothere.ttf").status_code == 404

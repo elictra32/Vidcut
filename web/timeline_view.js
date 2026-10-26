@@ -118,9 +118,11 @@ const draw = rafThrottle(() => {
   }
 });
 
-/** Task 10 plugs the subtitle lane in here. */
+/** The subtitle lane plugs in a painter and pointer handlers (see subtitles.js). */
 let drawSubtitleLane = null;
-export function setSubtitleLane(fn) { drawSubtitleLane = fn; draw(); }
+let laneHandler = null;
+export function setSubtitleLane(fn, handler) { drawSubtitleLane = fn; laneHandler = handler; draw(); }
+export const xForTime = (t) => xAt(t, canvas.getBoundingClientRect().width);
 export const redraw = draw;
 export const getView = () => view;
 export const timeAtX = (x) => timeAt(x);
@@ -158,20 +160,28 @@ export function initTimelineView() {
     if (!total()) return;
     canvas.setPointerCapture(e.pointerId);
     const x = e.offsetX;
+    if (e.offsetY >= LANE_TOP && laneHandler?.down(e)) {
+      drag = { kind: "lane" };
+      return;
+    }
     const handle = handleAt(x);
     drag = { kind: handle ?? "scrub" };
     if (drag.kind === "scrub") player.seek(Math.min(Math.max(0, timeAt(x)), total()));
   });
   canvas.addEventListener("pointermove", (e) => {
     if (!drag) {
-      canvas.style.cursor = total() && handleAt(e.offsetX) ? "ew-resize" : "default";
+      canvas.style.cursor = (e.offsetY >= LANE_TOP && laneHandler?.hover(e)) || (total() && handleAt(e.offsetX) ? "ew-resize" : "default");
       return;
     }
+    if (drag.kind === "lane") return laneHandler.move(e);
     const t = timeAt(e.offsetX);
     if (drag.kind === "scrub") player.seek(Math.min(Math.max(0, t), total()));
     else setEdge(drag.kind, t);
   });
-  const end = () => (drag = null);
+  const end = () => {
+    if (drag?.kind === "lane") laneHandler.up();
+    drag = null;
+  };
   canvas.addEventListener("pointerup", end);
   canvas.addEventListener("pointercancel", end);
   canvas.addEventListener("wheel", (e) => {
@@ -186,7 +196,7 @@ export function initTimelineView() {
 
   const ensureAll = () => getProject()?.clips.forEach((c) => ensurePeaks(c, draw));
   subscribe((why) => {
-    if (why === "load") { ensureAll(); if (!getProject().selection) fitView(); }
+    if (why === "load") { ensureAll(); fitView(); }
     if (why === "keeps") clampView();
     draw();
   });
