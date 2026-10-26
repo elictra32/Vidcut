@@ -48,7 +48,18 @@ def tokens_to_words(tokens: list[Token]) -> list[Word]:
         if not piece.strip():
             pending_space = True
             continue
-        words.append(Word(piece.strip(), span[0][1], span[-1][2], space_before=pending_space))
+        text_piece = piece.strip()
+        marks = len(text_piece) - len(text_piece.lstrip("".join(chr(c) for c in range(0x0E31, 0x0E3B))
+                                                       + "".join(chr(c) for c in range(0x0E47, 0x0E4F))))
+        if words and not pending_space and marks:
+            # a vowel/tone mark can't start a word: newmm sometimes splits an unusual cluster ("อือ" | "ืคน");
+            # hand the mark(s) back to the word they belong to
+            prev = words[-1]
+            words[-1] = Word(prev.text + text_piece[:marks], prev.start, prev.end, prev.space_before)
+            text_piece = text_piece[marks:]
+            if not text_piece:
+                continue
+        words.append(Word(text_piece, span[0][1], span[-1][2], space_before=pending_space))
         pending_space = False
     return words
 

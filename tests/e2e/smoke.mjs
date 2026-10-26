@@ -1,7 +1,7 @@
 // End-to-end smoke test: real server + real browser, fake Whisper (no model download).
 // Run:  VIDCUT_PYTHON=python node tests/e2e/smoke.mjs   (NODE_PATH must reach a global playwright)
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, makeWebm, must, startApp } from "./harness.mjs";
@@ -59,6 +59,19 @@ try {
   await page.click("text=ล้างไฟล์ชั่วคราว");
   await page.waitForSelector(".toast:not(.error):has-text('ล้างไฟล์ชั่วคราวแล้ว')", { timeout: 10000 });
   must(true, "temp files can be cleared from the UI");
+  // import an SRT (UTF-8 with BOM and CRLF, as YouTube Studio writes it): text kept, tags and fillers removed
+  const srtPath = join(clipDir, "captions.srt");
+  writeFileSync(srtPath, "\ufeff1\r\n00:00:01,000 --> 00:00:04,000\r\nทดสอบนำเข้าซับจากยูทูป\r\n\r\n" +
+    "2\r\n00:00:04,500 --> 00:00:08,000\r\nเออ\r\n\r\n3\r\n00:00:08,000 --> 00:00:12,000\r\n[เสียงหัวเราะ]ข้อความที่สอง\r\n", "utf-8");
+  await page.setInputFiles("#srt-file", srtPath);
+  await page.waitForSelector("dialog[open]");
+  const onlySelection = page.locator("dialog[open] input[type=checkbox]");
+  if (await onlySelection.isChecked()) await onlySelection.uncheck();
+  await page.click("dialog[open] button.primary"); // replaces the existing subtitles; the confirm() is auto-accepted
+  await page.waitForSelector(".toast:not(.error):has-text('นำเข้าซับแล้ว')", { timeout: 10000 });
+  const imported = (await page.$$eval(".sub-row textarea", (n) => n.map((x) => x.value))).join("").replaceAll("\n", ""); // long lines wrap into rows
+  must(imported.includes("ทดสอบนำเข้าซับจากยูทูป") && imported.includes("ข้อความที่สอง"), "SRT import: the cue text is in the subtitle list");
+  must(!imported.includes("เสียงหัวเราะ") && !imported.includes("เออ"), "SRT import: tags and fillers were removed");
   must(problems.length === 0, "no console errors" + (problems.length ? ": " + problems.join(" | ") : ""));
 } catch (e) {
   failed = true;

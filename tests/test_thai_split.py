@@ -77,3 +77,17 @@ def test_build_lines_oversize_word_own_row():
 
 def test_build_lines_empty_input_returns_empty():
     assert build_lines([], line_width=10, max_lines=2) == []
+
+
+def test_no_word_starts_with_a_combining_mark():
+    """newmm can split an elongated filler ('อือื') so that a vowel mark starts the next word."""
+    import unicodedata
+    words = tokens_to_words([Token("อือื", 0.0, 1.0), Token("คนที่ประสบความสำเร็จ", 1.0, 3.0)])
+    assert "".join(w.text for w in words) == "อือืคนที่ประสบความสำเร็จ"
+    assert all(unicodedata.category(w.text[0]) != "Mn" for w in words)
+    assert all(a.end <= b.start + 1e-9 for a, b in zip(words, words[1:]))
+
+
+def test_a_misplaced_mark_goes_back_to_its_word_and_the_next_word_stays_whole():
+    words = tokens_to_words([Token("อือื", 0.0, 1.0), Token("คนที่ประสบความสำเร็จ", 1.0, 3.0)])
+    assert words[0].text.endswith("ื") and words[1].text.startswith("คน")

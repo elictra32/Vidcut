@@ -17,6 +17,7 @@ core/    pure logic, no web code, unit-tested          server/  thin FastAPI glu
   transcribe.py faster-whisper wrapper; autosub.py selection -> Subtitle[]
   ass.py        ASS + SRT output; presets.py  TikTok/YouTube
   fonts.py      bundled font list + CSS-size -> libass-Fontsize factor
+  srt.py        SRT parser; srt_import.py YouTube auto-caption cues -> source-anchored subtitles
   export.py     ffmpeg filter graph, run_export, render_preview_frame
 web/     one ES module per concern (state.js is the store; timeline_math.js mirrors core/timeline.py)
 fonts/   Sarabun + Prompt (SIL OFL), used by the browser preview AND the ffmpeg export
@@ -69,6 +70,16 @@ tests/   pytest (tests/), node tests (tests/js), Playwright smoke test (tests/e2
   edit -> export. `multiclip.mjs`: playback continues across clips. Both use WebM (Playwright's Chromium lacks H.264)
   and share `harness.mjs`.
 - The real-Whisper test is marked `slow` and needs a model download.
+
+## SRT import (YouTube auto captions)
+
+`POST /api/subtitles/import-srt`. YouTube's cues are *rolling*: a cue's end is when its line leaves the screen, cues
+overlap, sentences (even words) are split across cues, and there are tags/speaker marks/fillers. `srt_import.py`
+therefore (1) cleans text (`[...]`, `>>`, filler-only cues), (2) derives each cue's speech window from the *next
+cue's start* (dropped cues still bound the one before them), capped by a speaking rate, (3) feeds the windows as
+tokens through the same `tokens_to_words` + `build_lines` as Whisper output. Times are source times of the uncut
+video, which is exactly what subtitles are anchored to, so later cuts need no remapping. Only that clip's subtitles
+are replaced. Checked against a real 92-minute, 1,610-cue Thai file (0.5 s to convert, no overlaps).
 
 ## Adding an LLM step later (typo fixing, bad-take removal)
 

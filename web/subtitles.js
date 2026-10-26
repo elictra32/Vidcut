@@ -1,12 +1,12 @@
 // Subtitle panel (auto-generate, list, edit text), and the subtitle lane on the edit timeline.
 import { api } from "./api.js";
-import { flush, getProject, reloadAfterJob, setSelectedSub, subscribe, ui, update } from "./state.js";
+import { flush, getProject, loadProject, reloadAfterJob, setSelectedSub, subscribe, ui, update } from "./state.js";
 import { trackJob } from "./status.js";
 import { showError, showToast } from "./toast.js";
 import * as tm from "./timeline_math.js";
 import * as player from "./player.js";
 import { LANE_TOP, setSubtitleLane, timeAtX } from "./timeline_view.js";
-import { $, cssVar, el, fmtTime } from "./util.js";
+import { $, basename, cssVar, el, fmtTime } from "./util.js";
 
 const MODELS = {
   "large-v3": "แม่นที่สุด · ครั้งแรกต้องดาวน์โหลดราว 3 GB · ช้าสุดบน CPU",
@@ -39,6 +39,41 @@ async function generate(model) {
   }
 }
 
+/** Import an .srt (e.g. YouTube auto captions). Times are source times of the SAME uncut video. */
+function openImportDialog(fileName, srtText) {
+  const p = getProject();
+  if (!p.clips.length) return showToast("เพิ่มคลิปก่อน แล้วค่อยนำเข้าซับ", "error");
+  const clipSel = el("select", {}, p.clips.map((c) => el("option", { value: c.id }, basename(c.path))));
+  clipSel.value = p.clips.some((c) => c.id === ui.currentClipId) ? ui.currentClipId : p.clips[0].id;
+  const onlySel = el("input", { type: "checkbox", checked: !!p.selection, disabled: !p.selection });
+  const offset = el("input", { type: "number", value: 0, step: 0.1 });
+  const dlg = el("dialog", { class: "frame-dialog import-dialog" },
+    el("h3", {}, `นำเข้าซับจาก ${fileName}`),
+    el("p", { class: "muted small" }, "ไฟล์ SRT ต้องมาจากวิดีโอไฟล์เดียวกับที่ใส่ในโปรแกรม (ไฟล์ต้นฉบับก่อนตัด Dead air) เวลาจึงจะตรงกัน"),
+    el("label", { class: "field" }, el("span", {}, "ใส่ซับให้กับคลิป"), clipSel),
+    el("label", { class: "field inline" }, el("span", {}, p.selection ? "เฉพาะช่วง In/Out ที่เลือก" : "เฉพาะช่วง In/Out (ยังไม่ได้เลือกช่วง)"), onlySel),
+    el("label", { class: "field" }, el("span", {}, "เลื่อนเวลา (วินาที) ใส่ค่าบวกถ้าซับมาช้าไป"), offset),
+    el("div", { class: "row" },
+      el("button", { onclick: () => dlg.close() }, "ยกเลิก"),
+      el("button", { class: "primary", onclick: async () => {
+        const clipId = clipSel.value;
+        if (getProject().subtitles.some((x) => x.clip_id === clipId) && !confirm("ซับเดิมของคลิปนี้จะถูกแทนที่ ทำต่อไหม?")) return;
+        dlg.close();
+        try {
+          await flush(); // the server converts against its saved copy (selection, keeps)
+          const r = await api("POST", "/api/subtitles/import-srt", {
+            clip_id: clipId, srt_text: srtText, offset: parseFloat(offset.value) || 0, only_selection: onlySel.checked });
+          await loadProject();
+          showToast(`นำเข้าซับแล้ว ${r.count} บรรทัด`);
+        } catch (e) {
+          showError(e);
+        }
+      } }, "นำเข้า")));
+  dlg.addEventListener("close", () => dlg.remove());
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
 function addBlank() {
   const p = getProject();
   const hit = tm.editedToSource(p.clips, player.getTime());
@@ -59,12 +94,21 @@ export function initSubtitles() {
   const note = el("p", { class: "muted small" }, MODELS[model.value]);
   model.addEventListener("change", () => (remember("vidcut.model", model.value), (note.textContent = MODELS[model.value])));
   const list = el("div", { class: "sub-list" });
+  const srtInput = el("input", { type: "file", id: "srt-file", accept: ".srt,.txt,text/plain", hidden: true });
+  srtInput.addEventListener("change", async () => {
+    const file = srtInput.files[0];
+    srtInput.value = ""; // choosing the same file again must fire 'change' again
+    if (file) openImportDialog(file.name, await file.text());
+  });
   root.replaceChildren(
     el("h2", {}, "ซับไตเติล"),
     el("label", { class: "field" }, el("span", {}, "โมเดลถอดเสียง"), model), note,
     el("div", { class: "row" },
       el("button", { class: "primary", onclick: () => generate(model.value) }, "สร้างซับอัตโนมัติ"),
       el("button", { onclick: addBlank }, "+ เพิ่มซับ")),
+    el("div", { class: "row" },
+      el("button", { title: "นำเข้าซับจากไฟล์ .srt เช่นที่ดาวน์โหลดจาก YouTube Studio", onclick: () => srtInput.click() }, "นำเข้าไฟล์ .srt"),
+      srtInput),
     list);
 
   const render = () => {

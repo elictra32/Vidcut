@@ -27,6 +27,8 @@ from core.media import FFmpegError, is_browser_playable, make_proxy, probe
 from core.models import Clip, Keep, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
+from core.srt import parse_srt
+from core.srt_import import cues_to_subtitles
 from core.waveform import waveform_peaks
 from server import fake_whisper
 from server.errors import AppError, from_exception, payload
@@ -218,6 +220,32 @@ def create_app(home: str | None = None) -> FastAPI:
         if not os.path.isfile(path):
             raise AppError("file_missing", "ไม่พบไฟล์ต้นฉบับ", "ตรวจว่าไฟล์ยังอยู่ในตำแหน่งเดิม", status=404)
         return FileResponse(path, media_type=mimetypes.guess_type(path)[0] or "video/mp4")
+
+    # ---- subtitles from an SRT file (e.g. YouTube auto captions) -----------------------------
+    @app.post("/api/subtitles/import-srt")
+    def import_srt(body: dict):
+        clip_id = str(body.get("clip_id", ""))
+        offset = float(body.get("offset", 0.0))
+        only_selection = bool(body.get("only_selection", True))
+        cues = parse_srt(str(body.get("srt_text", "")))
+        if not cues:
+            raise AppError("srt_empty", "ไม่พบซับในไฟล์นี้", "ต้องเป็นไฟล์ .srt (UTF-8) เช่นที่ดาวน์โหลดจาก YouTube Studio")
+        st.clip(clip_id)  # 404 when unknown
+        with st.lock:
+            snap = copy.deepcopy(st.project)
+        if only_selection and snap.selection is None:
+            raise AppError("no_selection", "ยังไม่ได้เลือกช่วงที่จะนำเข้า",
+                           "ตั้งจุด In/Out ก่อน หรือเลือกนำเข้าทั้งไฟล์")
+        subs = cues_to_subtitles(snap.clips, clip_id, cues, PRESETS[snap.preset], offset,
+                                 snap.selection if only_selection else None)
+        if not subs:
+            raise AppError("srt_no_match", "ไม่มีซับตรงกับช่วงเวลาของคลิปนี้",
+                           "เช็กว่าอัปโหลดไฟล์ต้นฉบับไฟล์เดียวกันขึ้น YouTube ลองเลื่อนเวลา หรือเลือกนำเข้าทั้งไฟล์")
+        with st.lock:
+            st.project.subtitles = [x for x in st.project.subtitles if x.clip_id != clip_id] + subs
+            st.project.rev += 1
+            st.save()
+        return {"count": len(subs)}
 
     # ---- transcribe / export -------------------------------------------------------------
     @app.post("/api/transcribe")

@@ -381,3 +381,77 @@ def test_proxy_jobs_do_not_starve_other_jobs():
     assert runner.get(quick)["state"] == "done"
     assert runner.get(slow[1])["state"] == "queued"  # waits its turn, and says so
     release.set()
+
+
+# ---- SRT import (YouTube captions) -------------------------------------------------------------
+SRT = ("1\n00:00:00,500 --> 00:00:02,000\nสวัสดีครับทุกคน\n\n"
+       "2\n00:00:02,200 --> 00:00:03,800\nวันนี้เรามาตัดต่อ\n")
+
+
+def import_srt(client, cid, **kw):
+    body = {"clip_id": cid, "srt_text": SRT, "only_selection": False}
+    body.update(kw)
+    return client.post("/api/subtitles/import-srt", json=body)
+
+
+def test_import_srt_creates_source_anchored_subtitles(client, tmp_path):
+    cid = add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))["clip"]["id"]
+    r = import_srt(client, cid)
+    assert r.status_code == 200 and r.json()["count"] >= 1
+    subs = get_project(client)["subtitles"]
+    assert all(s["clip_id"] == cid for s in subs)
+    assert "".join(s["text"] for s in subs).replace("\n", "") == "สวัสดีครับทุกคนวันนี้เรามาตัดต่อ"
+    assert subs[0]["src_start"] == pytest.approx(0.5, abs=0.01)
+
+
+def test_import_srt_replaces_only_that_clips_subtitles(client, tmp_path):
+    a = add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))["clip"]["id"]
+    b = add_clip(client, make_clip(str(tmp_path / "b.mp4"), [("tone", 4)]))["clip"]["id"]
+    keep = {"id": "keepme", "clip_id": b, "src_start": 1.0, "src_end": 2.0, "text": "ของคลิป B", "x": None, "y": None}
+    old = {"id": "old", "clip_id": a, "src_start": 1.0, "src_end": 2.0, "text": "ซับเก่า", "x": None, "y": None}
+    put_project(client, subtitles=[old, keep])
+    rev = get_project(client)["rev"]
+    assert import_srt(client, a).status_code == 200
+    subs = get_project(client)["subtitles"]
+    assert [s["id"] for s in subs if s["clip_id"] == b] == ["keepme"]
+    assert not any(s["id"] == "old" for s in subs)
+    assert get_project(client)["rev"] > rev
+
+
+def test_import_srt_only_selection_needs_a_selection(client, tmp_path):
+    cid = add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))["clip"]["id"]
+    r = import_srt(client, cid, only_selection=True)
+    assert r.status_code == 400 and r.json()["error"]["code"] == "no_selection"
+
+
+def test_import_srt_only_selection_keeps_cues_in_range(client, tmp_path):
+    cid = add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))["clip"]["id"]
+    put_project(client, selection={"start": 0.0, "end": 2.1})
+    assert import_srt(client, cid, only_selection=True).status_code == 200
+    text = "".join(s["text"] for s in get_project(client)["subtitles"]).replace("\n", "")
+    assert text == "สวัสดีครับทุกคน"
+
+
+def test_import_srt_offset_shifts_times(client, tmp_path):
+    cid = add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))["clip"]["id"]
+    import_srt(client, cid, offset=0.25)
+    assert get_project(client)["subtitles"][0]["src_start"] == pytest.approx(0.75, abs=0.01)
+
+
+@pytest.mark.parametrize("srt", ["", "this is not subtitles"])
+def test_import_srt_of_a_non_srt_file_is_a_thai_error(client, tmp_path, srt):
+    cid = add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))["clip"]["id"]
+    r = import_srt(client, cid, srt_text=srt)
+    assert r.status_code == 400 and r.json()["error"]["code"] == "srt_empty"
+    assert any("฀" <= ch <= "๿" for ch in r.json()["error"]["message"])
+
+
+def test_import_srt_that_matches_nothing_says_so(client, tmp_path):
+    cid = add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))["clip"]["id"]
+    r = import_srt(client, cid, offset=500.0)
+    assert r.status_code == 400 and r.json()["error"]["code"] == "srt_no_match"
+    assert get_project(client)["subtitles"] == []
+
+
+def test_import_srt_for_an_unknown_clip_is_404(client):
+    assert import_srt(client, "nope").status_code == 404
