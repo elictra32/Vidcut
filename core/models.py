@@ -17,6 +17,9 @@ class Framing:
     crop_center_x: float = 0.5
 
 
+ROLES = ("main", "intro", "outro")  # intro/outro clips are not on the edit timeline; export joins them around the selection
+
+
 @dataclass
 class Clip:
     id: str
@@ -29,6 +32,7 @@ class Clip:
     proxy_path: str | None = None
     keeps: list[Keep] = field(default_factory=list)
     framing: Framing = field(default_factory=Framing)
+    role: str = "main"
 
 
 @dataclass
@@ -72,12 +76,21 @@ def _default_style() -> SubtitleStyle:
 
 
 @dataclass
+class ExportSettings:
+    container: str = "mp4"  # mp4 | mov | mkv | webm
+    quality: str = "medium"  # high | medium | small | custom (custom uses target_mb)
+    target_mb: float | None = None
+    out_dir: str = ""  # "" = the default exports folder; set by the server only
+
+
+@dataclass
 class Project:
     clips: list[Clip] = field(default_factory=list)
     selection: Selection | None = None
     subtitles: list[Subtitle] = field(default_factory=list)
     style: SubtitleStyle = field(default_factory=_default_style)
     preset: str = DEFAULT_PRESET
+    export: ExportSettings = field(default_factory=ExportSettings)
     rev: int = 0  # bumped whenever the server itself changes the project (jobs); stale saves are refused
 
 
@@ -99,5 +112,6 @@ def project_from_dict(d: dict) -> Project:
         subtitles=[Subtitle(**s) for s in d.get("subtitles", [])],
         style=SubtitleStyle(**d.get("style", {})),
         preset=d.get("preset", "tiktok"),
+        export=ExportSettings(**d.get("export", {})),
         rev=int(d.get("rev", 0)),
     )

@@ -9,6 +9,7 @@ const DATA = JSON.parse(readFileSync(new URL("../fixtures/timeline_cases.json", 
 const clipsFor = (name) =>
   DATA.projects[name].map((c) => ({
     id: c.id,
+    role: c.role ?? "main",
     duration: c.duration,
     keeps: c.keeps.map(([start, end, enabled]) => ({ start, end, enabled })),
   }));
@@ -125,4 +126,10 @@ test("nextPlayTarget: clips with nothing enabled are skipped", () => {
   const clips = clipsFor("multi");
   clips.splice(1, 0, { id: "mid", duration: 9, keeps: [{ start: 0, end: 9, enabled: false }] });
   assert.deepEqual(tm.nextPlayTarget(clips, "c1", 31), { kind: "clip", clipId: "c2", src: 0 });
+});
+
+test("nextPlayTarget never hops into an intro or outro clip", () => {
+  const clips = clipsFor("roles");
+  assert.deepEqual(tm.nextPlayTarget(clips, "c1", 31), { kind: "end" });
+  assert.deepEqual(tm.nextPlayTarget(clips, "c1", 15), { kind: "seek", src: 20 });
 });

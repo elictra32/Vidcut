@@ -50,6 +50,60 @@ export function initExportPanel() {
   safe.addEventListener("change", () => setUi({ showSafeZone: safe.checked }, "safezone"));
   const exportBtn = el("button", { class: "primary" }, "ส่งออกวิดีโอ");
 
+  // ---- file format, quality / target size, folder, and a size estimate ----
+  const setExport = (patch) => update((p) => Object.assign(p.export, patch), "export");
+  const option = (value, label) => el("option", { value }, label);
+  const container = el("select", { id: "opt-container" },
+    option("mp4", "MP4 (เปิดได้ทุกที่ แนะนำ)"), option("mov", "MOV"), option("mkv", "MKV"), option("webm", "WebM (เข้ารหัสช้ากว่า)"));
+  const quality = el("select", { id: "opt-quality" },
+    option("high", "คุณภาพสูง (ไฟล์ใหญ่)"), option("medium", "คุณภาพกลาง"), option("small", "ไฟล์เล็ก"), option("custom", "กำหนดขนาดเอง"));
+  const target = el("input", { type: "number", id: "opt-target", min: 1, step: 1 });
+  const targetRow = el("label", { class: "field" }, el("span", {}, "ขนาดไฟล์เป้าหมาย (MB)"), target);
+  const folderText = el("span", { class: "folder-text small" });
+  const estimate = el("p", { id: "estimate", class: "estimate small" });
+  container.addEventListener("change", () => setExport({ container: container.value }));
+  quality.addEventListener("change", () => setExport({ quality: quality.value, ...(quality.value === "custom" && !getProject().export.target_mb ? { target_mb: 20 } : {}) }));
+  target.addEventListener("input", () => setExport({ target_mb: parseFloat(target.value) || null }));
+  const setFolder = async (call) => {
+    try {
+      const r = await call();
+      update((p) => (p.export.out_dir = r.out_dir), "export");
+    } catch (e) {
+      showError(e);
+    }
+  };
+  const folderRow = el("div", { class: "field" }, el("span", {}, "บันทึกไฟล์ที่"), folderText,
+    el("div", { class: "row" },
+      el("button", { id: "opt-folder-pick", onclick: () => setFolder(() => api("POST", "/api/export-folder/pick")) }, "เลือกโฟลเดอร์…"),
+      el("button", { class: "ghost", onclick: () => setFolder(() => api("POST", "/api/export-folder", { path: "" })) }, "ใช้โฟลเดอร์เริ่มต้น")));
+
+  let lastSig = "", estimateSeq = 0, estimateTimer = null;
+  const extrasSeconds = (p, role) => p.clips.filter((c) => c.role === role)
+    .reduce((t, c) => t + tm.enabledKeeps(c).reduce((a, k) => a + k.end - k.start, 0), 0);
+  const refreshEstimate = () => {
+    const p = getProject();
+    if (!p) return;
+    const sig = JSON.stringify([p.selection, p.preset, p.export.container, p.export.quality, p.export.target_mb,
+      p.clips.map((c) => [c.id, c.role, c.keeps])]);
+    if (sig === lastSig) return;
+    lastSig = sig;
+    clearTimeout(estimateTimer);
+    estimateTimer = setTimeout(async () => {
+      const seq = ++estimateSeq;
+      try {
+        await flush(); // the server estimates from its saved copy
+        const r = await api("POST", "/api/export/estimate");
+        if (seq !== estimateSeq) return;
+        const mb = r.bytes / 1048576;
+        const parts = [extrasSeconds(p, "intro") && `ปกหัว ${fmtTime(extrasSeconds(p, "intro"))}`, `เนื้อหา ${fmtTime(p.selection ? p.selection.end - p.selection.start : tm.editedDuration(p.clips))}`,
+          extrasSeconds(p, "outro") && `ปกท้าย ${fmtTime(extrasSeconds(p, "outro"))}`].filter(Boolean).join(" + ");
+        estimate.textContent = `ความยาวไฟล์ ${fmtTime(r.seconds)} (${parts}) · ขนาดประมาณ ${mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)} MB (±15%) · วิดีโอ ${(r.video_kbps / 1000).toFixed(1)} Mbps`;
+      } catch (e) {
+        if (seq === estimateSeq) estimate.textContent = e.payload?.code === "selection_invalid" ? "ยังประเมินขนาดไม่ได้: ช่วงที่เลือกไม่ถูกต้อง" : "";
+      }
+    }, 350);
+  };
+
   exportBtn.addEventListener("click", async () => {
     const p = getProject();
     const total = tm.editedDuration(p.clips);
@@ -62,10 +116,11 @@ export function initExportPanel() {
       const { job } = await api("POST", "/api/export", { preset: p.preset });
       const done = await trackJob("กำลังส่งออกวิดีโอ", job);
       if (!done) return;
-      const { mp4, srt, dir } = done.result;
+      const { video, srt, dir, downloadable } = done.result;
       const link = (name, label) => el("a", { href: `/exports/${encodeURIComponent(name)}`, download: name }, label);
-      result.replaceChildren(el("strong", {}, "ส่งออกสำเร็จ"), el("div", { class: "row" }, link(mp4, "ดาวน์โหลด MP4"), link(srt, "ดาวน์โหลด .srt")),
-        el("p", { class: "muted small" }, `ไฟล์อยู่ที่โฟลเดอร์: ${dir}`));
+      result.replaceChildren(el("strong", {}, "ส่งออกสำเร็จ"),
+        downloadable ? el("div", { class: "row" }, link(video, `ดาวน์โหลด .${video.split(".").pop()}`), link(srt, "ดาวน์โหลด .srt")) : "",
+        el("p", { class: "muted small" }, `ไฟล์ ${video} อยู่ที่โฟลเดอร์: ${dir}`));
     } catch (e) {
       showError(e);
     } finally {
@@ -74,6 +129,8 @@ export function initExportPanel() {
   });
 
   root.replaceChildren(el("h2", {}, "ส่งออก"), seg, framing,
+    el("label", { class: "field" }, el("span", {}, "ชนิดไฟล์"), container),
+    el("label", { class: "field" }, el("span", {}, "คุณภาพ / ขนาด"), quality), targetRow, folderRow, estimate,
     el("label", { class: "field inline" }, el("span", {}, "แสดงเส้นกันชนปุ่มของแอป"), safe),
     el("div", { class: "row" }, el("button", { onclick: checkFrame }, "ตรวจเฟรมจริง"), exportBtn), result);
 
@@ -81,6 +138,12 @@ export function initExportPanel() {
     const p = getProject();
     const presets = getPresets();
     if (!p || !Object.keys(presets).length) return;
+    container.value = p.export.container;
+    quality.value = p.export.quality;
+    targetRow.hidden = p.export.quality !== "custom";
+    if (document.activeElement !== target) target.value = p.export.target_mb ?? "";
+    folderText.textContent = p.export.out_dir || "โฟลเดอร์เริ่มต้นของโปรแกรม (VidcutProjects\\default\\exports)";
+    refreshEstimate();
     seg.replaceChildren(...Object.keys(presets).map((k) =>
       el("button", { "aria-pressed": String(p.preset === k), onclick: () => p.preset !== k && setPreset(k) }, LABELS[k] ?? k)));
     const clip = currentClip();

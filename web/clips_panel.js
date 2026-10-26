@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { getProject, loadProject, reloadAfterJob, setCurrentClip, subscribe, ui, update } from "./state.js";
+import { getProject, loadProject, reloadAfterJob, setCurrentClip, subscribe, ui, update, updateKeeps } from "./state.js";
 import { remapSelection } from "./timeline_math.js";
 import { trackJob } from "./status.js";
 import { showError, showToast } from "./toast.js";
@@ -35,6 +35,13 @@ export async function addClipFromPath(path) {
   }
 }
 
+const ROLE_LABELS = { main: "คลิปหลัก", intro: "ปกหัว", outro: "ปกท้าย" };
+
+/** Intro/outro clips leave the edit timeline (so the In/Out selection stays on the main clip). */
+function setRole(id, role) {
+  updateKeeps((p) => (p.clips.find((c) => c.id === id).role = role));
+}
+
 function removeClip(id) {
   const before = structuredClone(getProject().clips);
   update((p) => {
@@ -64,6 +71,9 @@ export function initClipsPanel() {
         el("button", { class: "clip-main", onclick: () => (setCurrentClip(c.id), player.showClip(c.id)) },
           el("span", { class: "clip-name", title: c.path }, basename(c.path)),
           el("span", { class: "muted" }, `${fmtTime(c.duration)} · ${c.width}×${c.height}${c.has_audio ? "" : " · ไม่มีเสียง"}`)),
+        el("select", { class: "role", "aria-label": "บทบาทของคลิป", title: "ปกหัว/ปกท้ายจะถูกต่อหน้า/หลังช่วงที่เลือกตอนส่งออก",
+          onchange: (e) => setRole(c.id, e.target.value) },
+          Object.entries(ROLE_LABELS).map(([v, label]) => el("option", { value: v, selected: (c.role ?? "main") === v }, label))),
         el("button", { class: "ghost icon", title: "เอาคลิปออกจากโปรเจกต์ (ไม่ลบไฟล์)", onclick: () => removeClip(c.id) }, "✕")));
     }
     root.replaceChildren(el("h2", {}, "คลิป"),

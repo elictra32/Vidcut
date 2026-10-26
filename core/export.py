@@ -12,10 +12,11 @@ from pathlib import Path
 
 from core import media
 from core.ass import RenderedSub, to_ass, to_srt
+from core.encode import encoder_args, output_extension
 from core.media import Cancelled, FFmpegError  # noqa: F401  (Cancelled re-exported for callers)
-from core.models import Clip, Project, Selection
+from core.models import Clip, ExportSettings, Project, Selection
 from core.presets import PRESETS, Preset
-from core.timeline import Piece, edited_duration, selection_pieces, subtitles_for_export
+from core.timeline import Piece, edited_duration, enabled_keeps, selection_pieces, subtitles_for_export
 
 FONTS_SRC = Path(__file__).resolve().parent.parent / "fonts"
 FPS = 30
@@ -33,7 +34,7 @@ class ExportError(Exception):
 
 @dataclass
 class ExportResult:
-    mp4: str
+    video: str
     srt: str
 
 
@@ -100,7 +101,8 @@ def build_filter_graph(clips: list[Clip], pieces: list[Piece], preset: Preset, a
 
 def build_ffmpeg_cmd(clips: list[Clip], pieces: list[Piece], preset: Preset, ass_name: str | None,
                      out_name: str, include_audio: bool = True, frame_only: bool = False,
-                     frames: list[int] | None = None, intermediate: bool = False) -> list[str]:
+                     frames: list[int] | None = None, intermediate: bool = False,
+                     encoder: list[str] | None = None) -> list[str]:
     """ffmpeg argv (without the binary). One seeked input per piece; the graph is passed inline
     (`-filter_complex_script` is deprecated in FFmpeg 7+)."""
     by_id = {c.id: c for c in clips}
@@ -116,21 +118,52 @@ def build_ffmpeg_cmd(clips: list[Clip], pieces: list[Piece], preset: Preset, ass
     if intermediate:  # near-lossless scratch part, joined and encoded for real in the final pass
         return cmd + ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "14", "-pix_fmt", "yuv420p",
                       "-c:a", "pcm_s16le", out_name]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
-    if include_audio:
-        cmd += ["-c:a", "aac", "-b:a", "160k"]
-    return cmd + ["-movflags", "+faststart", out_name]
+    if encoder is None:  # default format and quality, sized for these pieces
+        encoder = encoder_args(ExportSettings(), preset.name, sum(p.src_end - p.src_start for p in pieces))
+    return cmd + encoder + [out_name]
 
 
-def _prepare(project: Project, selection: Selection):
+def _extra_pieces(clips: list[Clip], role: str, start_at: float) -> list[Piece]:
+    """The enabled keeps of every clip with `role`, in clip order, laid out from `start_at`."""
+    out, t = [], start_at
+    for c in clips:
+        if c.role != role:
+            continue
+        for k in enabled_keeps(c):
+            out.append(Piece(c.id, k.start, k.end, t))
+            t += k.end - k.start
+    return out
+
+
+def export_pieces(project: Project, selection: Selection) -> tuple[list[Piece], float]:
+    """Everything that goes into the file, in order: intro clips, the selection of the main timeline,
+    outro clips. Returns the pieces (out_start along the whole output) and the intro's length."""
+    main = selection_pieces(project.clips, selection)  # ValueError("selection_invalid") when unusable
+    intro = _extra_pieces(project.clips, "intro", 0.0)
+    intro_dur = sum(p.src_end - p.src_start for p in intro)
+    main = [Piece(p.clip_id, p.src_start, p.src_end, p.out_start + intro_dur) for p in main]
+    main_end = intro_dur + sum(p.src_end - p.src_start for p in main)
+    return intro + main + _extra_pieces(project.clips, "outro", main_end), intro_dur
+
+
+def export_duration(project: Project) -> float:
+    """Length in seconds of the file an export would produce (raises ValueError when the selection is unusable)."""
+    selection = project.selection or Selection(0.0, edited_duration(project.clips))
+    return sum(p.src_end - p.src_start for p in export_pieces(project, selection)[0])
+
+
+def _prepare(project: Project, selection: Selection, with_extras: bool = True):
     preset = PRESETS[project.preset]
     try:
-        pieces = selection_pieces(project.clips, selection)
+        if with_extras:
+            pieces, intro_dur = export_pieces(project, selection)
+        else:
+            pieces, intro_dur = selection_pieces(project.clips, selection), 0.0
     except ValueError:
         raise ExportError("selection_invalid",
                           "ช่วงที่เลือกไม่ถูกต้อง หรือไม่มีช่วงที่เปิดใช้งานเหลืออยู่ "
                           "กรุณาตั้งจุดเริ่ม/จบใหม่ และเปิดช่วงที่ถูกตัดอย่างน้อยหนึ่งช่วง") from None
-    rendered = [RenderedSub(a, b, s.text, s.x, s.y)
+    rendered = [RenderedSub(a + intro_dur, b + intro_dur, s.text, s.x, s.y)
                 for a, b, s in subtitles_for_export(project.clips, project.subtitles, selection)]
     return preset, pieces, rendered
 
@@ -166,14 +199,14 @@ def _ffmpeg(cmd, duration, progress_cb, cancel_event, wd):
         raise
 
 
-def _unique_paths(out_dir: str, stem: str) -> tuple[str, str]:
-    """First free <stem>[_N].mp4/.srt pair: an export never replaces an earlier one."""
+def _unique_paths(out_dir: str, stem: str, ext: str) -> tuple[str, str]:
+    """First free <stem>[_N].<ext>/.srt pair: an export never replaces an earlier one."""
     n = 1
     while True:
         name = stem if n == 1 else f"{stem}_{n}"
-        mp4, srt = os.path.join(out_dir, name + ".mp4"), os.path.join(out_dir, name + ".srt")
-        if not os.path.exists(mp4) and not os.path.exists(srt):
-            return mp4, srt
+        video, srt = os.path.join(out_dir, f"{name}.{ext}"), os.path.join(out_dir, name + ".srt")
+        if not os.path.exists(video) and not os.path.exists(srt):
+            return video, srt
         n += 1
 
 
@@ -186,16 +219,19 @@ def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=No
     if not pieces:
         raise ExportError("selection_invalid", "ช่วงที่เลือกสั้นเกินไป กรุณาเลือกช่วงที่ยาวกว่านี้")
     report = progress_cb or (lambda p, m="": None)
+    total = sum(p.src_end - p.src_start for p in pieces)
+    ext = output_extension(project.export)
+    encoder = encoder_args(project.export, preset.name, total)
+    out_name = f"out.{ext}"
     wd = _workdir(preset, project, rendered)
     try:
         if len(pieces) <= BATCH:
-            cmd = build_ffmpeg_cmd(project.clips, pieces, preset, "subs.ass", "out.mp4", frames=frames)
-            _ffmpeg(cmd, sum(p.src_end - p.src_start for p in pieces), progress_cb, cancel_event, wd)
+            cmd = build_ffmpeg_cmd(project.clips, pieces, preset, "subs.ass", out_name, frames=frames, encoder=encoder)
+            _ffmpeg(cmd, total, progress_cb, cancel_event, wd)
         else:
             # Bounded passes: each batch is rendered to a scratch part, then one pass joins the parts
             # and burns the subtitles. Keeps memory and the command line small however many cuts there are.
             spans = [(i, min(i + BATCH, len(pieces))) for i in range(0, len(pieces), BATCH)]
-            total = sum(p.src_end - p.src_start for p in pieces)
             done = 0.0
             for k, (i, j) in enumerate(spans):
                 part = pieces[i:j]
@@ -209,15 +245,14 @@ def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=No
             Path(wd, "parts.txt").write_text("".join(f"file 'part_{k}.mkv'\n" for k in range(len(spans))),
                                              encoding="utf-8")
             final = ["-f", "concat", "-safe", "0", "-i", "parts.txt", "-vf", "subtitles=subs.ass:fontsdir=fonts",
-                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-                     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "out.mp4"]
+                     *encoder, out_name]
             _ffmpeg(final, total, lambda f, m="": report(0.8 + 0.2 * f, m), cancel_event, wd)
         os.makedirs(out_dir, exist_ok=True)
         with _name_lock:
-            mp4, srt = _unique_paths(out_dir, f"{_safe_stem(project.clips[0].path)}_{preset.name}")
-            shutil.move(os.path.join(wd, "out.mp4"), mp4)
+            video, srt = _unique_paths(out_dir, f"{_safe_stem(project.clips[0].path)}_{preset.name}", ext)
+            shutil.move(os.path.join(wd, out_name), video)
             Path(srt).write_text(to_srt(rendered), encoding="utf-8")
-        return ExportResult(mp4, srt)
+        return ExportResult(video, srt)
     finally:
         shutil.rmtree(wd, ignore_errors=True)
 
@@ -226,7 +261,7 @@ def render_preview_frame(project: Project, edited_t: float, out_png: str) -> Non
     """Render one real frame (with subtitles and framing) at the given edited time."""
     total = edited_duration(project.clips)
     t = min(max(0.0, edited_t), max(0.0, total - 0.1))
-    preset, pieces, rendered = _prepare(project, Selection(t, min(total, t + 0.1)))
+    preset, pieces, rendered = _prepare(project, Selection(t, min(total, t + 0.1)), with_extras=False)
     pieces, frames = _plan(pieces)
     wd = _workdir(preset, project, rendered)
     try:

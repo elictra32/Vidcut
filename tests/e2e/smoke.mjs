@@ -11,7 +11,8 @@ const EDITED = "ทดสอบข้อความที่แก้ไข 123
 const clipDir = mkdtempSync(join(tmpdir(), "vidcut-clip-"));
 const clip = join(clipDir, "demo.webm");
 makeWebm(clip, 30, "sin(2*PI*440*t)*(lt(mod(t\\,5)\\,3))"); // 3 s of tone, 2 s of silence, repeated
-const app = await startApp({ VIDCUT_PICK_OVERRIDE: clip, VIDCUT_FAKE_WHISPER: "1" });
+const pickedDir = join(clipDir, "picked-folder");
+const app = await startApp({ VIDCUT_PICK_OVERRIDE: clip, VIDCUT_FAKE_WHISPER: "1", VIDCUT_PICK_FOLDER_OVERRIDE: pickedDir });
 
 let failed = false;
 let browser;
@@ -72,6 +73,16 @@ try {
   const imported = (await page.$$eval(".sub-row textarea", (n) => n.map((x) => x.value))).join("").replaceAll("\n", ""); // long lines wrap into rows
   must(imported.includes("ทดสอบนำเข้าซับจากยูทูป") && imported.includes("ข้อความที่สอง"), "SRT import: the cue text is in the subtitle list");
   must(!imported.includes("เสียงหัวเราะ") && !imported.includes("เออ"), "SRT import: tags and fillers were removed");
+  // export options: another format and size, a size estimate, and a chosen folder
+  await page.selectOption("#opt-container", "mkv");
+  await page.selectOption("#opt-quality", "small");
+  await page.waitForFunction(() => /MB/.test(document.querySelector("#estimate")?.textContent ?? ""), null, { timeout: 10000 });
+  must(/ขนาดประมาณ/.test(await page.$eval("#estimate", (e) => e.textContent)), "the export panel shows a size estimate");
+  await page.click("#opt-folder-pick");
+  await page.waitForFunction(() => document.querySelector(".folder-text")?.textContent.includes("picked-folder"), null, { timeout: 10000 });
+  await page.click("text=ส่งออกวิดีโอ");
+  await page.waitForSelector(".export-result:has-text('picked-folder')", { timeout: 120000 });
+  must(existsSync(join(pickedDir, "demo_tiktok.mkv")) && existsSync(join(pickedDir, "demo_tiktok.srt")), "the MKV and .srt were written to the chosen folder");
   must(problems.length === 0, "no console errors" + (problems.length ? ": " + problems.join(" | ") : ""));
 } catch (e) {
   failed = true;

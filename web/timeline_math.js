@@ -6,11 +6,14 @@ const EPS = 1e-9;
 export const enabledKeeps = (clip) =>
   clip.keeps.filter((k) => k.enabled).sort((a, b) => a.start - b.start);
 
+/** The clips on the edit timeline; intro/outro clips are joined around the selection at export. */
+export const mainClips = (clips) => clips.filter((c) => (c.role ?? "main") === "main");
+
 /** Every enabled keep in edited order, with where it starts on the edited axis. */
 export function segments(clips) {
   const out = [];
   let t = 0;
-  for (const c of clips) {
+  for (const c of mainClips(clips)) {
     for (const k of enabledKeeps(c)) {
       out.push({ clipId: c.id, keep: k, editedStart: t, len: k.end - k.start });
       t += k.end - k.start;
@@ -141,7 +144,7 @@ export function nextPlayTarget(clips, clipId, t) {
   if (keeps.some((k) => t >= k.start - 0.03 && t < k.end)) return { kind: "play" };
   const next = keeps.find((k) => k.start > t);
   if (next) return { kind: "seek", src: next.start };
-  for (const c of clips.slice(i + 1)) {
+  for (const c of mainClips(clips.slice(i + 1))) {
     const first = enabledKeeps(c)[0];
     if (first) return { kind: "clip", clipId: c.id, src: first.start };
   }

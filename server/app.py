@@ -21,10 +21,11 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import media
 from core.autosub import generate_subtitles
-from core.export import render_preview_frame, run_export
+from core.encode import AUDIO_KBPS, _normalized, estimate_bytes, video_kbps
+from core.export import export_duration, render_preview_frame, run_export
 from core.fonts import FONT_FILES
 from core.media import FFmpegError, is_browser_playable, make_proxy, probe
-from core.models import Clip, Keep, Project, Selection, project_from_dict, project_to_dict
+from core.models import ROLES, Clip, Keep, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
 from core.srt import parse_srt
@@ -85,6 +86,24 @@ def _pick_file() -> str | None:
         root.destroy()
 
 
+def _pick_folder() -> str | None:
+    override = os.environ.get("VIDCUT_PICK_FOLDER_OVERRIDE")
+    if override:
+        return override
+    try:
+        import tkinter
+        from tkinter import filedialog
+    except ImportError as e:
+        raise AppError("picker_unavailable", "เปิดหน้าต่างเลือกโฟลเดอร์ไม่ได้", "พิมพ์พาธของโฟลเดอร์ในช่องแทน", status=501) from e
+    root = tkinter.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        return filedialog.askdirectory(title="เลือกโฟลเดอร์สำหรับไฟล์ที่ส่งออก") or None
+    finally:
+        root.destroy()
+
+
 def create_app(home: str | None = None) -> FastAPI:
     st = State(home or default_home())
     app = FastAPI(title="Vidcut")
@@ -131,7 +150,7 @@ def create_app(home: str | None = None) -> FastAPI:
             if proj.rev != st.project.rev:
                 raise AppError("project_stale", "ข้อมูลในหน้านี้ไม่ใช่เวอร์ชันล่าสุด (มีงานเบื้องหลังเพิ่งทำเสร็จ)",
                                "โหลดข้อมูลล่าสุดให้แล้ว ลองแก้ไขอีกครั้ง", status=409)
-            # The page owns keeps/framing/subtitles/style/selection. Everything about the media itself
+            # The page owns keeps/framing/role/subtitles/style/selection. Everything about the media itself
             # (path, proxy, size, duration) is the server's, and clips only enter through /api/clips.
             current = {c.id: c for c in st.project.clips}
             clips = []
@@ -139,8 +158,10 @@ def create_app(home: str | None = None) -> FastAPI:
                 known = current.get(c.id)
                 if known is not None:
                     known.keeps, known.framing = c.keeps, c.framing
+                    known.role = c.role if c.role in ROLES else "main"
                     clips.append(known)
             proj.clips = clips
+            proj.export.out_dir = st.project.export.out_dir  # where files get written is chosen via /api/export-folder
             proj.subtitles = [s for s in proj.subtitles if s.clip_id in current]
             st.project = proj
             st.save()
@@ -279,10 +300,50 @@ def create_app(home: str | None = None) -> FastAPI:
                 st.save()
             snap = copy.deepcopy(st.project)
 
+        out_dir = snap.export.out_dir or st.exports
+
         def work(progress, cancel):
-            res = run_export(snap, st.exports, progress, cancel)
-            return {"mp4": os.path.basename(res.mp4), "srt": os.path.basename(res.srt), "dir": st.exports}
+            res = run_export(snap, out_dir, progress, cancel)
+            return {"video": os.path.basename(res.video), "srt": os.path.basename(res.srt), "dir": out_dir,
+                    "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
         return {"job": st.jobs.submit(work, "export")}
+
+    def set_export_folder(path: str) -> dict:
+        path = path.strip().strip('"')
+        if path:
+            try:
+                os.makedirs(path, exist_ok=True)
+                probe = tempfile.NamedTemporaryFile(dir=path, prefix=".vidcut_", delete=True)
+                probe.close()
+            except OSError as e:
+                raise AppError("folder_unwritable", "เขียนไฟล์ลงโฟลเดอร์นี้ไม่ได้",
+                               "เลือกโฟลเดอร์อื่น หรือตรวจสิทธิ์การเขียนของโฟลเดอร์นี้", str(e)) from e
+        with st.lock:
+            st.project.export.out_dir = path
+            st.save()
+        return {"out_dir": path}
+
+    @app.post("/api/export-folder")
+    def post_export_folder(body: dict):
+        return set_export_folder(str(body.get("path", "")))
+
+    @app.post("/api/export-folder/pick")
+    def pick_export_folder():
+        path = _pick_folder()
+        return set_export_folder(path) if path else {"out_dir": st.project.export.out_dir}
+
+    @app.post("/api/export/estimate")
+    def post_export_estimate():
+        """Length and expected size of the file an export would produce, from the saved project."""
+        with st.lock:
+            snap = copy.deepcopy(st.project)
+        try:
+            seconds = export_duration(snap)
+        except ValueError as e:  # "selection_invalid" -> the Thai message
+            raise from_exception(e) from e
+        s = _normalized(snap.export)
+        return {"seconds": seconds, "bytes": estimate_bytes(s, snap.preset, seconds),
+                "video_kbps": video_kbps(s, snap.preset, seconds), "audio_kbps": AUDIO_KBPS[s.container]}
 
     @app.post("/api/preview-frame")
     def post_preview_frame(body: dict):

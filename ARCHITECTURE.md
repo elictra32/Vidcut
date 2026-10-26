@@ -71,6 +71,15 @@ tests/   pytest (tests/), node tests (tests/js), Playwright smoke test (tests/e2
   and share `harness.mjs`.
 - The real-Whisper test is marked `slow` and needs a model download.
 
+## Intro / outro clips and export options
+
+`Clip.role` is `main`, `intro` or `outro`. Only `main` clips are on the edit timeline (`core/timeline.py` and its JS
+port ignore the others), so the In/Out selection stays on the main clip. `export_pieces` lays out intro clips, then the
+selection, then outro clips (each uses its own enabled keeps and framing); subtitle times are shifted by the intro length.
+`core/encode.py` turns `ExportSettings` (container mp4/mov/mkv/webm, quality or a target size in MB) into a fixed video
+bitrate, which is why the size can be estimated before encoding (`/api/export/estimate`; real encoders land within
+~10-15%). The output folder is server-owned (`/api/export-folder`), like clip paths.
+
 ## SRT import (YouTube auto captions)
 
 `POST /api/subtitles/import-srt`. YouTube's cues are *rolling*: a cue's end is when its line leaves the screen, cues

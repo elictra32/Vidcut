@@ -20,17 +20,22 @@ def enabled_keeps(clip: Clip) -> list[Keep]:
     return sorted((k for k in clip.keeps if k.enabled), key=lambda k: k.start)
 
 
+def main_clips(clips):
+    """The clips on the edit timeline. Intro/outro clips are joined around the selection at export."""
+    return [c for c in clips if c.role == "main"]
+
+
 def _segments(clips):
-    """Yield (clip_id, keep, edited_start) for every enabled keep in edited order."""
+    """Yield (clip_id, keep, edited_start) for every enabled keep of the main clips, in edited order."""
     t = 0.0
-    for c in clips:
+    for c in main_clips(clips):
         for k in enabled_keeps(c):
             yield c.id, k, t
             t += k.end - k.start
 
 
 def edited_duration(clips: list[Clip]) -> float:
-    return sum(k.end - k.start for c in clips for k in enabled_keeps(c))
+    return sum(k.end - k.start for c in main_clips(clips) for k in enabled_keeps(c))
 
 
 def source_to_edited(clips, clip_id, src_t) -> float | None:

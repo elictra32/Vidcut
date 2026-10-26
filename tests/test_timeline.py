@@ -11,7 +11,7 @@ DATA = json.loads((Path(__file__).parent / "fixtures" / "timeline_cases.json").r
 
 def clips_for(name):
     return [Clip(id=c["id"], path="", duration=c["duration"], width=1, height=1, fps=25,
-                 has_audio=True, keeps=[Keep(*k) for k in c["keeps"]])
+                 has_audio=True, role=c.get("role", "main"), keeps=[Keep(*k) for k in c["keeps"]])
             for c in DATA["projects"][name]]
 
 

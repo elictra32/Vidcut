@@ -102,7 +102,8 @@ export async function play(until = null) {
   const p = getProject();
   if (!p || !tm.segments(p.clips).length) return;
   stopAt = until;
-  if (!loadedClipId) await seek(editedTime);
+  const loaded = p.clips.find((c) => c.id === loadedClipId);
+  if (!loaded || (loaded.role ?? "main") !== "main") await seek(editedTime); // an intro/outro is only for review: play the main timeline
   if (editedTime >= tm.editedDuration(p.clips) - 0.05) await seek(0);
   wantPlay = true;
   await video.play().catch(() => {});

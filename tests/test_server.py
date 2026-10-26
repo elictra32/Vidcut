@@ -171,7 +171,7 @@ def test_export_job_produces_mp4_and_srt(client, tmp_path):
     put_project(client, selection={"start": 0, "end": 2})
     j = wait_job(client, client.post("/api/export", json={"preset": "youtube"}).json()["job"])
     assert j["state"] == "done", j
-    mp4, srt = j["result"]["mp4"], j["result"]["srt"]
+    mp4, srt = j["result"]["video"], j["result"]["srt"]
     assert client.get(f"/exports/{mp4}").status_code == 200
     assert client.get(f"/exports/{srt}").status_code == 200
     assert get_project(client)["preset"] == "youtube"
@@ -271,7 +271,7 @@ def test_export_result_reports_output_folder(client, tmp_path):
     add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))
     put_project(client, selection={"start": 0, "end": 2})
     j = wait_job(client, client.post("/api/export", json={}).json()["job"])
-    assert os.path.isdir(j["result"]["dir"]) and os.path.exists(os.path.join(j["result"]["dir"], j["result"]["mp4"]))
+    assert os.path.isdir(j["result"]["dir"]) and os.path.exists(os.path.join(j["result"]["dir"], j["result"]["video"]))
 
 
 
@@ -455,3 +455,114 @@ def test_import_srt_that_matches_nothing_says_so(client, tmp_path):
 
 def test_import_srt_for_an_unknown_clip_is_404(client):
     assert import_srt(client, "nope").status_code == 404
+
+
+def test_put_saves_a_clip_role_and_falls_back_to_main_for_unknown_ones(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "a.mp4"), SPEC))
+    p = get_project(client)
+    p["clips"][0]["role"] = "intro"
+    assert client.put("/api/project", json=p).status_code == 200
+    assert get_project(client)["clips"][0]["role"] == "intro"
+    p = get_project(client)
+    p["clips"][0]["role"] = "bogus"
+    assert client.put("/api/project", json=p).status_code == 200
+    assert get_project(client)["clips"][0]["role"] == "main"
+
+
+@pytest.mark.skipif(not has_libass(), reason="ffmpeg without libass")
+def test_export_job_joins_an_outro_clip(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "main.mp4"), [("tone", 4)]))
+    outro = add_clip(client, make_clip(str(tmp_path / "outro.mp4"), [("tone", 1.5)]))["clip"]["id"]
+    p = get_project(client)
+    next(c for c in p["clips"] if c["id"] == outro)["role"] = "outro"
+    p["selection"] = {"start": 0, "end": 2}
+    assert client.put("/api/project", json=p).status_code == 200
+    j = wait_job(client, client.post("/api/export", json={}).json()["job"])
+    assert j["state"] == "done", j
+    out = os.path.join(j["result"]["dir"], j["result"]["video"])
+    d = float(__import__("subprocess").run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", out],
+                                           capture_output=True, text=True).stdout)
+    assert d == pytest.approx(2 + 1.5, abs=0.15)
+
+
+# ---- export options: estimate, folder, container ------------------------------------------------------
+def export_settings(client, **kw):
+    p = get_project(client)
+    p["export"].update(kw)
+    assert client.put("/api/project", json=p).status_code == 200
+
+
+def test_estimate_reports_length_and_size(client, tmp_path):
+    from core.encode import estimate_bytes
+    from core.models import ExportSettings
+    add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))
+    put_project(client, selection={"start": 0, "end": 2})
+    r = client.post("/api/export/estimate").json()
+    assert r["seconds"] == pytest.approx(2.0, abs=0.05)
+    assert r["bytes"] == estimate_bytes(ExportSettings(), "tiktok", r["seconds"])
+    assert r["video_kbps"] == 5000 and r["audio_kbps"] == 160
+
+
+def test_estimate_follows_the_chosen_target_size(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))
+    put_project(client, selection={"start": 0, "end": 2})
+    export_settings(client, quality="custom", target_mb=1.0)
+    assert client.post("/api/export/estimate").json()["bytes"] == pytest.approx(1048576, rel=0.02)
+
+
+def test_estimate_counts_intro_and_outro(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "main.mp4"), [("tone", 4)]))
+    intro = add_clip(client, make_clip(str(tmp_path / "intro.mp4"), [("tone", 1.5)]))["clip"]["id"]
+    p = get_project(client)
+    next(c for c in p["clips"] if c["id"] == intro)["role"] = "intro"
+    p["selection"] = {"start": 0, "end": 2}
+    assert client.put("/api/project", json=p).status_code == 200
+    assert client.post("/api/export/estimate").json()["seconds"] == pytest.approx(3.5, abs=0.05)
+
+
+def test_estimate_for_an_unusable_selection_is_a_thai_error(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))
+    put_project(client, selection={"start": 3, "end": 3})
+    r = client.post("/api/export/estimate")
+    assert r.status_code == 400 and r.json()["error"]["code"] == "selection_invalid"
+
+
+def test_export_folder_by_path_is_created_and_remembered(client, tmp_path):
+    target = tmp_path / "ปลายทาง ใหม่" / "shorts"
+    r = client.post("/api/export-folder", json={"path": str(target)})
+    assert r.status_code == 200 and target.is_dir()
+    assert get_project(client)["export"]["out_dir"] == str(target)
+    assert client.post("/api/export-folder", json={"path": ""}).status_code == 200
+    assert get_project(client)["export"]["out_dir"] == ""
+
+
+def test_export_folder_must_be_a_folder_we_can_write_to(client, tmp_path):
+    f = tmp_path / "file.txt"
+    f.write_text("x")
+    r = client.post("/api/export-folder", json={"path": str(f)})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "folder_unwritable"
+
+
+def test_export_folder_pick_uses_the_override_env(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDCUT_PICK_FOLDER_OVERRIDE", str(tmp_path / "picked"))
+    assert client.post("/api/export-folder/pick").json()["out_dir"] == str(tmp_path / "picked")
+
+
+def test_put_cannot_change_the_export_folder(client, tmp_path):
+    client.post("/api/export-folder", json={"path": str(tmp_path / "mine")})
+    export_settings(client, out_dir="/etc", container="mkv")
+    got = get_project(client)["export"]
+    assert got["out_dir"] == str(tmp_path / "mine") and got["container"] == "mkv"
+
+
+@pytest.mark.skipif(not has_libass(), reason="ffmpeg without libass")
+def test_export_job_uses_the_chosen_container_and_folder(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))
+    put_project(client, selection={"start": 0, "end": 2})
+    client.post("/api/export-folder", json={"path": str(tmp_path / "out here")})
+    export_settings(client, container="mkv", quality="small")
+    j = wait_job(client, client.post("/api/export", json={}).json()["job"])
+    assert j["state"] == "done", j
+    assert j["result"]["video"].endswith(".mkv") and j["result"]["dir"] == str(tmp_path / "out here")
+    assert j["result"]["downloadable"] is False
+    assert os.path.exists(os.path.join(j["result"]["dir"], j["result"]["video"]))

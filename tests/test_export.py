@@ -78,7 +78,7 @@ def test_export_tiktok_dimensions_and_duration(tmp_path):
     p = make_clip(str(tmp_path / "in.mp4"), SPEC)
     out = tmp_path / "out"
     res = run_export(real_project(p), str(out))
-    info = probe_streams(res.mp4)
+    info = probe_streams(res.video)
     v = next(s for s in info["streams"] if s["codec_type"] == "video")
     assert (v["width"], v["height"]) == (1080, 1920)
     assert abs(float(info["format"]["duration"]) - 4.0) < 0.2
@@ -93,7 +93,7 @@ def test_export_path_with_spaces_and_thai_name(tmp_path):
     d.mkdir()
     p = make_clip(str(d / "ทดสอบ คลิป.mp4"), SPEC)
     res = run_export(real_project(p, preset="youtube"), str(tmp_path / "out dir"))
-    v = next(s for s in probe_streams(res.mp4)["streams"] if s["codec_type"] == "video")
+    v = next(s for s in probe_streams(res.video)["streams"] if s["codec_type"] == "video")
     assert (v["width"], v["height"]) == (1920, 1080)
 
 
@@ -101,7 +101,7 @@ def test_export_path_with_spaces_and_thai_name(tmp_path):
 def test_export_clip_without_audio_has_audio_stream(tmp_path):
     p = make_clip(str(tmp_path / "n.mp4"), SPEC, with_audio=False)
     res = run_export(real_project(p, audio=False), str(tmp_path / "out"))
-    kinds = {s["codec_type"] for s in probe_streams(res.mp4)["streams"]}
+    kinds = {s["codec_type"] for s in probe_streams(res.video)["streams"]}
     assert kinds == {"video", "audio"}
 
 
@@ -181,8 +181,8 @@ def test_export_with_many_cuts_stays_in_sync(tmp_path):
     proj = many_cuts_project(p, n=20, keep=1.37, step=2.0, duration=41, preset="youtube")
     res = run_export(proj, str(tmp_path / "out"))
     expected = 20 * 1.37
-    assert media_duration(res.mp4, "v:0") == pytest.approx(expected, abs=1 / 30 + 0.01)
-    assert media_duration(res.mp4, "a:0") == pytest.approx(expected, abs=0.06)
+    assert media_duration(res.video, "v:0") == pytest.approx(expected, abs=1 / 30 + 0.01)
+    assert media_duration(res.video, "a:0") == pytest.approx(expected, abs=0.06)
 
 
 @needs_libass
@@ -195,7 +195,7 @@ def test_export_with_many_pieces_runs_in_bounded_batches(tmp_path, monkeypatch):
     res = run_export(many_cuts_project(p, n=10), str(tmp_path / "out"))
     inputs = [a.count("-i") for a in runs]
     assert inputs == [4, 4, 2, 1]  # three batches of <=4 pieces, then one concat + subtitles pass
-    assert media_duration(res.mp4, "v:0") == pytest.approx(10 * 0.7, abs=1 / 30 + 0.01)
+    assert media_duration(res.video, "v:0") == pytest.approx(10 * 0.7, abs=1 / 30 + 0.01)
 
 
 @needs_libass
@@ -203,8 +203,116 @@ def test_second_export_never_overwrites_the_first(tmp_path):
     p = make_clip(str(tmp_path / "in.mp4"), SPEC)
     out = str(tmp_path / "out")
     first = run_export(real_project(p, sel=(0, 2)), out)
-    size1 = os.path.getsize(first.mp4)
+    size1 = os.path.getsize(first.video)
     second = run_export(real_project(p, sel=(1, 4)), out)
-    assert second.mp4 != first.mp4 and second.srt != first.srt
-    assert os.path.exists(first.mp4) and os.path.getsize(first.mp4) == size1
-    assert os.path.basename(second.mp4) == "in_tiktok_2.mp4"
+    assert second.video != first.video and second.srt != first.srt
+    assert os.path.exists(first.video) and os.path.getsize(first.video) == size1
+    assert os.path.basename(second.video) == "in_tiktok_2.mp4"
+
+
+# ---- intro / outro clips -------------------------------------------------------------------------
+from core.export import export_pieces  # noqa: E402
+
+
+def role_clip(cid, role, keeps, path="/abs/x.mp4", duration=100):
+    return Clip(id=cid, path=path, duration=duration, width=640, height=360, fps=25, has_audio=True, role=role,
+                keeps=[Keep(*k) if isinstance(k, tuple) else k for k in keeps])
+
+
+def three_part_project(main_path="/abs/main.mp4", intro_path="/abs/intro.mp4", outro_path="/abs/outro.mp4"):
+    return Project(clips=[role_clip("intro", "intro", [(0, 2), (3, 4)], intro_path, 10),
+                          role_clip("c1", "main", [(0, 10), (20, 30)], main_path, 100),
+                          role_clip("outro", "outro", [(0, 1.5), Keep(2, 3, False)], outro_path, 10)])
+
+
+def test_export_pieces_put_the_intro_before_and_the_outro_after_the_selection():
+    pieces, intro_dur = export_pieces(three_part_project(), Selection(5, 15))
+    assert intro_dur == 3
+    assert [(p.clip_id, p.src_start, p.src_end, p.out_start) for p in pieces] == [
+        ("intro", 0, 2, 0), ("intro", 3, 4, 2), ("c1", 5, 10, 3), ("c1", 20, 25, 8), ("outro", 0, 1.5, 13)]
+
+
+def test_export_pieces_without_extras_are_just_the_selection():
+    proj = three_part_project()
+    proj.clips = [c for c in proj.clips if c.role == "main"]
+    pieces, intro_dur = export_pieces(proj, Selection(0, 4))
+    assert intro_dur == 0 and [(p.clip_id, p.out_start) for p in pieces] == [("c1", 0)]
+
+
+def test_export_pieces_need_a_main_clip():
+    proj = three_part_project()
+    proj.clips = [c for c in proj.clips if c.role == "intro"]
+    with pytest.raises(ValueError, match="selection_invalid"):
+        export_pieces(proj, Selection(0, 1))
+
+
+def test_subtitles_are_shifted_by_the_intro_length():
+    proj = three_part_project()
+    proj.subtitles = [Subtitle("s1", "c1", 6, 8, "ซับ")]
+    _, pieces, rendered = export_mod._prepare(proj, Selection(5, 15))
+    assert [(r.start, r.end) for r in rendered] == [(pytest.approx(4.0), pytest.approx(6.0))]  # 6-5 = 1, +3 s of intro
+
+
+@needs_libass
+def test_export_joins_intro_main_and_outro(tmp_path):
+    intro = make_clip(str(tmp_path / "intro.mp4"), [("tone", 2)])
+    main = make_clip(str(tmp_path / "main.mp4"), SPEC)
+    outro = make_clip(str(tmp_path / "outro.mp4"), [("tone", 1.5)])
+    proj = Project(clips=[role_clip("intro", "intro", [(0, 2)], intro, 2), role_clip("c1", "main", [(0, 4), (6, 10)], main, 10),
+                          role_clip("outro", "outro", [(0, 1.5)], outro, 1.5)],
+                   selection=Selection(1, 4), subtitles=[Subtitle("s", "c1", 1.5, 2.5, "ซับกลาง")])
+    res = run_export(proj, str(tmp_path / "out"))
+    assert media_duration(res.video, "v:0") == pytest.approx(2 + 3 + 1.5, abs=0.1)
+    assert "00:00:02,500 --> 00:00:03,500" in open(res.srt, encoding="utf-8").read()
+
+
+@needs_libass
+def test_preview_frame_shows_the_main_timeline_not_the_intro(tmp_path):
+    intro = make_clip(str(tmp_path / "intro.mp4"), [("tone", 2)])
+    main = make_clip(str(tmp_path / "main.mp4"), SPEC)
+    proj = Project(clips=[role_clip("intro", "intro", [(0, 2)], intro, 2), role_clip("c1", "main", [(0, 4)], main, 10)])
+    png = str(tmp_path / "f.png")
+    render_preview_frame(proj, 1.0, png)
+    v = probe_streams(png)["streams"][0]
+    assert (v["width"], v["height"]) == (1080, 1920)
+
+
+# ---- export options: container, target size, output folder --------------------------------------------
+from core.models import ExportSettings  # noqa: E402
+
+
+def format_of(path):
+    info = probe_streams(path)
+    codecs = {s["codec_type"]: s["codec_name"] for s in info["streams"]}
+    return info["format"]["format_name"], codecs
+
+
+@needs_libass
+@pytest.mark.parametrize("container,fmt_part,vcodec,acodec", [
+    ("mkv", "matroska", "h264", "aac"), ("mov", "mov", "h264", "aac"), ("webm", "webm", "vp9", "opus")])
+def test_export_in_each_container(tmp_path, container, fmt_part, vcodec, acodec):
+    p = make_clip(str(tmp_path / "in.mp4"), SPEC)
+    proj = real_project(p, preset="youtube", sel=(0, 2))
+    proj.export = ExportSettings(container=container)
+    res = run_export(proj, str(tmp_path / "out"))
+    assert res.video.endswith("." + container) and res.srt.endswith(".srt")
+    fmt, codecs = format_of(res.video)
+    assert fmt_part in fmt and codecs["video"] == vcodec and codecs["audio"] == acodec
+
+
+@needs_libass
+def test_export_to_a_target_size_stays_near_it(tmp_path):
+    p = make_clip(str(tmp_path / "in.mp4"), [("tone", 10)], size="1280x720")
+    proj = real_project(p, preset="youtube", sel=(0, 4))
+    proj.clips[0].keeps = [Keep(0, 10)]
+    proj.export = ExportSettings(quality="custom", target_mb=1.0)
+    res = run_export(proj, str(tmp_path / "out"))
+    assert os.path.getsize(res.video) <= 1.3 * 1048576
+
+
+@needs_libass
+def test_export_to_a_chosen_folder_with_spaces_and_thai(tmp_path):
+    p = make_clip(str(tmp_path / "in.mp4"), SPEC)
+    target = tmp_path / "โฟลเดอร์ ส่งออก" / "งาน 1"
+    res = run_export(real_project(p, sel=(0, 2)), str(target))
+    assert os.path.dirname(res.video) == str(target) and os.path.exists(res.srt)
