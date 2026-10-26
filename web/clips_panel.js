@@ -2,7 +2,7 @@ import { api } from "./api.js";
 import { getProject, loadProject, reloadAfterJob, setCurrentClip, subscribe, ui, update } from "./state.js";
 import { remapSelection } from "./timeline_math.js";
 import { trackJob } from "./status.js";
-import { showError } from "./toast.js";
+import { showError, showToast } from "./toast.js";
 import * as player from "./player.js";
 import { $, basename, el, fmtTime } from "./util.js";
 
@@ -45,6 +45,15 @@ function removeClip(id) {
   if (ui.currentClipId === id) setCurrentClip(getProject().clips[0]?.id ?? null);
 }
 
+async function clearTemp() {
+  try {
+    const { freed_bytes } = await api("POST", "/api/clear-temp");
+    showToast(`ล้างไฟล์ชั่วคราวแล้ว (คืนพื้นที่ ${(freed_bytes / 1048576).toFixed(1)} MB)`);
+  } catch (e) {
+    showError(e);
+  }
+}
+
 export function initClipsPanel() {
   const root = $("#clips-panel");
   const render = () => {
@@ -58,7 +67,8 @@ export function initClipsPanel() {
         el("button", { class: "ghost icon", title: "เอาคลิปออกจากโปรเจกต์ (ไม่ลบไฟล์)", onclick: () => removeClip(c.id) }, "✕")));
     }
     root.replaceChildren(el("h2", {}, "คลิป"),
-      p?.clips.length ? list : el("p", { class: "muted" }, "ยังไม่มีคลิป กด “เพิ่มคลิป” ด้านบน"));
+      p?.clips.length ? list : el("p", { class: "muted" }, "ยังไม่มีคลิป กด “เพิ่มคลิป” ด้านบน"),
+      el("button", { class: "ghost small", title: "ลบไฟล์พรีวิวที่ไม่ได้ใช้และโฟลเดอร์ชั่วคราว (ไม่แตะไฟล์ต้นฉบับ)", onclick: clearTemp }, "ล้างไฟล์ชั่วคราว"));
   };
   subscribe(render);
   render();
