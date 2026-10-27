@@ -70,7 +70,7 @@ class Title:
                 "Style: T,%s,100,&H00FFFFFF,&H00FFFFFF,&H00FFFFFF,&H00000000,0,0,0,0,100,100,0,0,1,%s,0,5,0,0,0,1\n\n"
                 "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n") % (W, H, FONT_FAMILY, OUTLINE)
         end = "0:00:%05.2f" % seconds
-        return head + "".join("Dialogue: 0,0:00:00.00,%s,T,,0,0,0,,{%s}%s\n" % (end, tags, text) for text, tags in events)
+        return head + "".join("Dialogue: %d,0:00:00.00,%s,T,,0,0,0,,{%s}%s\n" % (e[2] if len(e) > 2 else 1, end, e[1], e[0]) for e in events)
 
     def ink(self, ass_text, name="cal.ass"):
         (self.work / name).write_text(ass_text, encoding="utf-8")
@@ -118,10 +118,15 @@ class Title:
             top += hs[i] + TITLE_GAP
         return events, targets, fs
 
-    def layout(self, lines, seconds=TITLE_SECONDS, fade=TITLE_FADE):
+    def layout(self, lines, seconds=TITLE_SECONDS, fade=TITLE_FADE, scrim=0.0):
+        """scrim > 0 puts a black band (that opacity) behind the title: for light footage such as a white chart, where white text would vanish."""
         events, targets, fs = self.place(lines)
+        if scrim:
+            y0, y1 = int(targets[0][0] - 70), int(targets[-1][1] + 70)
+            a = "%02X" % round(255 * (1 - scrim))
+            events = [(f"m 0 {y0} l {W} {y0} {W} {y1} 0 {y1}", r"\an7\pos(0,0)\1c&H000000&\1a&H%s&\bord0\shad0\p1" % a, 0)] + events
         if fade:
-            events = [(t, tag + r"\fad(0,%d)" % round(fade * 1000)) for t, tag in events]
+            events = [(e[0], e[1] + r"\fad(0,%d)" % round(fade * 1000), *e[2:]) for e in events]
         (self.work / "title.ass").write_text(self._ass(events, seconds), encoding="utf-8")
         return dict(font_sizes=[round(f, 1) for f in fs], planned_ink_y=[(round(a), round(b)) for a, b in targets])
 
@@ -220,11 +225,12 @@ def build(edl, out_path, fonts_dir, keep=False):
         graph = "[0:v]null[v0]"
         if title:
             T = Title(work, fonts_dir)
-            info["title"] = T.layout(title["lines"], title.get("seconds", TITLE_SECONDS), title.get("fade", TITLE_FADE))
+            info["title"] = T.layout(title["lines"], title.get("seconds", TITLE_SECONDS), title.get("fade", TITLE_FADE), title.get("scrim", 0.0))
             graph = "[v0]ass=title.ass:fontsdir=fonts:shaping=complex[vt]"
         wm = Path(edl.get("watermark_png") or SKILL / "assets" / "watermark.png")
         tv = video_frames / FPS
-        chain = (f"[0:v][1:v]overlay={WATERMARK_XY[0]}:{WATERMARK_XY[1]}:enable='lt(t,{tv:.4f})':format=auto[v0];"
+        wx, wy = edl.get("watermark_xy", WATERMARK_XY)
+        chain = (f"[0:v][1:v]overlay={wx}:{wy}:enable='lt(t,{tv:.4f})':format=auto[v0];"
                  + (graph if title else "[v0]null[vt]"))
         loud = measure_loudness(work / "joined.mov")
         af = (f"loudnorm=I={LUFS}:TP=-1.5:LRA=7:measured_I={loud['input_i']}:measured_TP={loud['input_tp']}:measured_LRA={loud['input_lra']}:"
