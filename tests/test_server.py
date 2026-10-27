@@ -938,3 +938,17 @@ def test_episode_plan_measures_the_real_size_and_needs_fewer_episodes(client, tm
     assert e["est_bytes"] < worst["episodes"][0]["est_bytes"] * 2
     forced = client.post("/api/episodes/plan", json={"max_mb": 8, "measured_kbps": 5000}).json()   # a caller may pass its own
     assert forced["measured_kbps"] == 5000 and len(forced["episodes"]) >= 2
+
+
+def test_picking_another_brand_logo_replaces_the_old_one_in_place(client):
+    first = client.post("/api/overlays", json={"brand": "THUS_logo_white.png", "replace": True}).json()["overlay"]
+    p = get_project(client)
+    p["overlays"][0].update(x=0.2, y=0.8, width=0.3, opacity=0.7, start=1.0, end=4.0)
+    assert client.put("/api/project", json=p).status_code == 200
+    second = client.post("/api/overlays", json={"brand": "THUS_symbol_black.png", "replace": True}).json()["overlay"]
+    overlays = get_project(client)["overlays"]
+    assert len(overlays) == 1 and overlays[0]["id"] == second["id"] != first["id"]
+    assert (overlays[0]["x"], overlays[0]["y"], overlays[0]["width"], overlays[0]["opacity"], overlays[0]["start"], overlays[0]["end"]) == (0.2, 0.8, 0.3, 0.7, 1.0, 4.0)
+    assert overlays[0]["path"].endswith("THUS_symbol_black.png")
+    client.post("/api/overlays", json={"brand": "THUS_lockup_white.png"})       # without 'replace' a logo is simply added
+    assert len(get_project(client)["overlays"]) == 2

@@ -35,6 +35,11 @@ export function initEpisodes() {
             return el("tr", {}, el("td", {}, String(e.index)), el("td", {}, `${fmtTime(e.start)} – ${fmtTime(e.end)}`),
               el("td", {}, fmtTime(e.duration)), el("td", { title: `About ${mb(e.est_bytes)} MB; the encoder never goes above ${mb(e.max_bytes || e.est_bytes)} MB` }, `≈ ${mb(e.est_bytes)} MB`), el("td", { class: "ep-intro" }, sel));
           })),
+        r.measured_kbps
+          ? el("p", { class: "muted small", id: "ep-measure-note" }, `Measured on ${r.samples.length} short samples of your video: about ${Math.round(r.measured_kbps)} kbps of video (samples: ${r.samples.join(", ")}). Sizes are the expected sizes; the encoder never goes over the limit.`)
+          : el("p", { class: "q-error small", id: "ep-measure-note" }, r.measure_error
+            ? `Couldn't measure the real size (${r.measure_error}), so this plan assumes the worst case and may split more than needed.`
+            : "Not measured: this plan assumes the worst case and may split more than needed."),
         r.intro_reused ? el("p", { class: "muted small" }, `You have ${r.intro_clips} intro clip(s) for ${r.episodes.length} episodes, so the last one is reused.`) : "",
         !r.intro_clips ? el("p", { class: "muted small" }, "No intro clips: add them in Clips and set their role to Intro, one per episode, in order.") : "");
       picks = r.episodes.map((e) => e.intro_clip_id ?? "");

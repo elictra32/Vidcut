@@ -35,7 +35,7 @@ from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
 from core.timeline import cut_points, edited_duration, enabled_keeps
 from core.rewrap import rewrap_subtitles
-from core.sizing import measure_kbps
+from core.sizing import measure
 from core.srt import parse_srt
 from core.srt_import import cues_to_subtitles
 from core.highlights import LEXICON, find_highlights, lines_from_project, transcript_for_ai
@@ -333,7 +333,19 @@ def create_app(home: str | None = None) -> FastAPI:
             name = str(body["brand"])
             if name not in brand_logo_files():  # only the shipped files: never a path from the page
                 raise AppError("file_missing", "That logo isn't in the Vidcut logo folder", status=404)
-            return add_overlay(str(BRAND_LOGOS_DIR / name))
+            result = add_overlay(str(BRAND_LOGOS_DIR / name))
+            if body.get("replace"):
+                # picking another colour/shape swaps the earlier brand logo (it keeps its position, size and timing)
+                with st.lock:
+                    new = next(o for o in st.project.overlays if o.id == result["overlay"]["id"])
+                    old = [o for o in st.project.overlays if o is not new and os.path.dirname(o.path) == str(BRAND_LOGOS_DIR)]
+                    if old:
+                        keep = old[0]
+                        new.x, new.y, new.width, new.opacity, new.start, new.end = keep.x, keep.y, keep.width, keep.opacity, keep.start, keep.end
+                        st.project.overlays = [o for o in st.project.overlays if o not in old]
+                        st.save()
+                        result["overlay"] = asdict(new)
+            return result
         return add_overlay(str(body.get("path", "")))
 
     @app.post("/api/overlays/pick")
@@ -742,17 +754,19 @@ def create_app(home: str | None = None) -> FastAPI:
         max_mb = float((body or {}).get("max_mb", 500))
         with st.lock:
             snap = copy.deepcopy(st.project)
-        measured = (body or {}).get("measured_kbps")
+        measured, samples, measure_error = (body or {}).get("measured_kbps"), [], None
         if measured is None and (body or {}).get("measure", True):
             # encode a few short samples of this footage: the real size is far below the worst-case cap for easy footage
             q = copy.deepcopy(snap)
             q.export.quality = "auto"
             sel = q.selection or Selection(0.0, edited_duration(q.clips))
-            measured = measure_kbps(q, sel.start, sel.end)
+            m = measure(q, sel.start, sel.end)
+            measured, samples, measure_error = m.kbps, m.samples, m.error
         eps, n_intros = episode_plan(snap, max_mb, measured)
         intros = [{"id": c.id, "name": os.path.basename(c.path)} for c in snap.clips if c.role == "intro"]
         return {"episodes": [episode_json(e) for e in eps], "intro_clips": n_intros, "intros": intros,
-                "intro_reused": n_intros > 0 and n_intros < len(eps), "measured_kbps": measured}
+                "intro_reused": n_intros > 0 and n_intros < len(eps), "measured_kbps": measured,
+                "samples": samples, "measure_error": measure_error}
 
     @app.post("/api/episodes/export")
     def post_episodes_export(body: dict | None = None):

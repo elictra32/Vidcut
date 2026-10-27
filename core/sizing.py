@@ -4,6 +4,7 @@ Constant-quality (CRF) encoding of easy footage lands far below the worst-case b
 import os
 import shutil
 import tempfile
+from dataclasses import dataclass, field
 
 from core.encode import AUDIO_KBPS, _normalized
 from core.export import run_export
@@ -12,7 +13,7 @@ from core.models import Project, Selection
 
 SAMPLES = 4
 SAMPLE_S = 8.0
-SAFETY = 1.1  # footage varies: plan with a margin over the samples (the encoder cap is the hard guard)
+SAFETY = 1.15  # footage varies: plan with a margin over the mean of the samples (the encoder cap is the hard guard)
 
 
 def sample_windows(start: float, end: float, n: int = SAMPLES, length: float = SAMPLE_S) -> list[tuple[float, float]]:
@@ -28,15 +29,21 @@ def sample_windows(start: float, end: float, n: int = SAMPLES, length: float = S
     return [(a, a + length) for a in (start + (total - length) * i / (n - 1) for i in range(n))]
 
 
-def measure_kbps(project: Project, start: float, end: float, cancel=None, progress=None, run=run_export) -> float | None:
-    """Typical video kbps (with a safety margin), from short encodes of the project's own footage with its own export
-    settings. None when nothing could be measured."""
+@dataclass
+class Measurement:
+    kbps: float | None = None            # typical video kbps to plan with (mean of the samples plus a margin)
+    samples: list[float] = field(default_factory=list)  # video kbps of each sample, for showing the user
+    error: str | None = None             # why nothing could be measured
+
+
+def measure(project: Project, start: float, end: float, cancel=None, progress=None, run=run_export) -> Measurement:
+    """Typical video bitrate of the project's own footage at its own export settings, from a few short encodes."""
     windows = sample_windows(start, end)
     if not windows:
-        return None
+        return Measurement(error="The range is too short to sample")
     audio = AUDIO_KBPS[_normalized(project.export).container]
     scratch = tempfile.mkdtemp(prefix="vidcut_size_")
-    rates = []
+    rates: list[float] = []
     try:
         for i, (a, b) in enumerate(windows):
             if cancel is not None and cancel.is_set():
@@ -44,15 +51,16 @@ def measure_kbps(project: Project, start: float, end: float, cancel=None, progre
             if progress:
                 progress(i / len(windows), f"Measuring sample {i + 1}/{len(windows)}")
             res = run(project, scratch, None, cancel, selection=Selection(a, b), intro_ids=[], with_extras=False)
-            kbits = os.path.getsize(res.video) * 8 / 1000
-            rates.append(max(0.0, kbits / (b - a) - audio))
+            rates.append(max(0.0, os.path.getsize(res.video) * 8 / 1000 / (b - a) - audio))
             os.remove(res.video)
     except Cancelled:
         raise
-    except Exception:  # noqa: BLE001 - a failed measurement just means "plan from the cap"
-        return None
+    except Exception as e:  # noqa: BLE001 - say why, then the plan falls back to the worst case
+        return Measurement(error=f"{type(e).__name__}: {e}"[:300])
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    if not rates:
-        return None
-    return (0.5 * sum(rates) / len(rates) + 0.5 * max(rates)) * SAFETY
+    return Measurement(kbps=sum(rates) / len(rates) * SAFETY, samples=[round(r) for r in rates])
+
+
+def measure_kbps(project: Project, start: float, end: float, cancel=None, progress=None, run=run_export) -> float | None:
+    return measure(project, start, end, cancel, progress, run).kbps

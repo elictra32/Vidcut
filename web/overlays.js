@@ -20,9 +20,12 @@ function renderStage() {
   for (const o of p.overlays) {
     let node = nodes.get(o.id);
     if (!node) {
-      node = el("img", { class: "ov", src: `/overlay-media/${o.id}`, alt: "Logo or photo overlay", draggable: "false",
-        title: "Drag to move · mouse wheel to resize" });
-      node.addEventListener("pointerdown", (e) => startDrag(e, o.id));
+      // the picture, plus a ✕ that shows on the selected (or hovered) image so it can be removed right on the preview
+      const del = el("button", { class: "ov-del", title: "Remove this image", "aria-label": "Remove this image",
+        onpointerdown: (e) => e.stopPropagation(), onclick: () => removeImage(o.id) }, "✕");
+      node = el("div", { class: "ov", "data-id": o.id, title: "Drag to move · mouse wheel to resize · Delete key removes it" },
+        el("img", { src: `/overlay-media/${o.id}`, alt: "Logo or photo overlay", draggable: "false" }), del);
+      node.addEventListener("pointerdown", (e) => (select(o.id), startDrag(e, o.id)));
       node.addEventListener("wheel", (e) => {
         e.preventDefault();
         update((q) => { const t = find(q, o.id); t.width = +clamp(t.width * Math.exp(-e.deltaY * 0.001), 0.03, 1).toFixed(3); }, "ov-pos");
@@ -30,8 +33,16 @@ function renderStage() {
       layer.append(node);
       nodes.set(o.id, node);
     }
-    Object.assign(node.style, { left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.width * 100}%`, opacity: o.opacity });
+    Object.assign(node.style, { left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.width * 100}%` });
+    node.firstChild.style.opacity = o.opacity; // only the picture fades, not its ✕ button
+    node.classList.toggle("selected", o.id === selectedId);
   }
+}
+
+let selectedId = null;
+function select(id) {
+  selectedId = id;
+  renderStage();
 }
 
 function startDrag(e, id) {
@@ -66,7 +77,8 @@ async function addImage() {
 async function addBrandLogo(name) {
   try {
     if (!(await flush())) return;
-    await api("POST", "/api/overlays", { brand: name });
+    // trying logos: a new pick replaces the previous brand logo (keeping its place and size) instead of stacking on it
+    await api("POST", "/api/overlays", { brand: name, replace: true });
     await loadProject();
   } catch (e) {
     showError(e);
@@ -144,8 +156,25 @@ export function initOverlays() {
     if (!p.overlays.length) list.append(el("p", { class: "muted small" }, "No images yet."));
   };
 
+  window.addEventListener("keydown", (e) => {
+    if ((e.key !== "Delete" && e.key !== "Backspace") || !selectedId) return;
+    if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+    if (!getProject()?.overlays.some((o) => o.id === selectedId)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation(); // the timeline's Delete (remove segment) must not also fire
+    removeImage(selectedId);
+    selectedId = null;
+  }, true);
+  document.addEventListener("pointerdown", (e) => { // clicking anywhere but an image clears the selection
+    if (selectedId && !e.target.closest(".ov")) { selectedId = null; renderStage(); }
+  });
+  const markActiveTiles = () => {
+    const used = new Set((getProject()?.overlays ?? []).map((o) => basename(o.path)));
+    brandGrid.querySelectorAll(".brand-tile").forEach((t) => t.classList.toggle("active", used.has(t.dataset.file)));
+  };
   subscribe((why) => {
     renderStage();
+    markActiveTiles();
     if (why === "load") renderList();
     else if (why === "ov-pos") {
       // a drag on the preview moved an image: show the new position in the boxes

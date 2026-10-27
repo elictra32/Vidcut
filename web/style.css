@@ -173,3 +173,9 @@ button.danger { color: #ff8a8a; }
 .brand-tile { width: 76px; height: 50px; padding: 4px; background: #f4f4f4; border: 1px solid var(--border, #333); border-radius: 6px; cursor: pointer; }
 .brand-tile.dark { background: #1e1e28; }
 .brand-tile img { width: 100%; height: 100%; object-fit: contain; }
+.ov img { display: block; width: 100%; pointer-events: none; }
+.ov.selected { outline: 1px dashed var(--accent, #2dd4a7); outline-offset: 2px; }
+.ov-del { position: absolute; top: -12px; right: -12px; width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 1; font-size: 12px;
+  background: #c0392b; color: #fff; border: 1px solid #fff8; cursor: pointer; display: none; }
+.ov.selected .ov-del, .ov:hover .ov-del { display: block; }
+.brand-tile.active { outline: 2px solid var(--accent, #2dd4a7); }

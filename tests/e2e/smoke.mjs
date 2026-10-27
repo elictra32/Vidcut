@@ -21,6 +21,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const problems = [];
   page.on("console", (m) => m.type() === "error" && problems.push(m.text()));
+  page.on("response", (r) => r.status() >= 400 && problems.push(`${r.status()} ${r.request().method()} ${new URL(r.url()).pathname}`)); // which request failed
   page.on("pageerror", (e) => problems.push(e.message));
   page.on("dialog", (d) => d.accept());
 
