@@ -70,10 +70,13 @@ def estimate_bytes(s: ExportSettings, preset_name: str, duration: float, source_
     return round(kbps * 1000 / 8 * duration * CONTAINER_OVERHEAD)
 
 
-def encoder_args(s: ExportSettings, preset_name: str, duration: float, source_kbps: float | None = None) -> list[str]:
+def encoder_args(s: ExportSettings, preset_name: str, duration: float, source_kbps: float | None = None,
+                 max_kbps: int | None = None) -> list[str]:
     """ffmpeg codec/bitrate/container options for the final file (everything between the maps and the output name)."""
     s = _normalized(s)
     v = video_kbps(s, preset_name, duration, source_kbps)
+    if max_kbps:
+        v = min(v, max_kbps)
     rate = ["-b:v", f"{v}k", "-maxrate", f"{round(v * 1.25)}k", "-bufsize", f"{v * 2}k"]
     if s.quality == "auto":
         # constant quality: easy footage (a talking head, slides) takes far fewer bits than the cap, which only

@@ -114,3 +114,8 @@ def subtitles_for_export(clips, subs, sel: Selection) -> list[tuple[float, float
         if b - a > EPS:
             out.append((a - sel.start, b - sel.start, s))
     return sorted(out, key=lambda x: x[0])
+
+
+def cut_points(clips) -> list[float]:
+    """Edited times where one kept stretch ends and the next begins (dead air removed, or a new clip starts)."""
+    return [t for i, (_, _, t) in enumerate(_segments(clips)) if i > 0]

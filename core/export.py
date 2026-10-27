@@ -155,11 +155,11 @@ def build_ffmpeg_cmd(clips: list[Clip], pieces: list[Piece], preset: Preset, ass
     return cmd + encoder + [out_name]
 
 
-def _extra_pieces(clips: list[Clip], role: str, start_at: float) -> list[Piece]:
+def _extra_pieces(clips: list[Clip], role: str, start_at: float, only_ids: list[str] | None = None) -> list[Piece]:
     """The enabled keeps of every clip with `role`, in clip order, laid out from `start_at`."""
     out, t = [], start_at
     for c in clips:
-        if c.role != role:
+        if c.role != role or (only_ids is not None and c.id not in only_ids):
             continue
         for k in enabled_keeps(c):
             out.append(Piece(c.id, k.start, k.end, t))
@@ -167,11 +167,11 @@ def _extra_pieces(clips: list[Clip], role: str, start_at: float) -> list[Piece]:
     return out
 
 
-def export_pieces(project: Project, selection: Selection) -> tuple[list[Piece], float]:
+def export_pieces(project: Project, selection: Selection, intro_ids: list[str] | None = None) -> tuple[list[Piece], float]:
     """Everything that goes into the file, in order: intro clips, the selection of the main timeline,
     outro clips. Returns the pieces (out_start along the whole output) and the intro's length."""
     main = selection_pieces(project.clips, selection)  # ValueError("selection_invalid") when unusable
-    intro = _extra_pieces(project.clips, "intro", 0.0)
+    intro = _extra_pieces(project.clips, "intro", 0.0, intro_ids)
     intro_dur = sum(p.src_end - p.src_start for p in intro)
     main = [Piece(p.clip_id, p.src_start, p.src_end, p.out_start + intro_dur) for p in main]
     main_end = intro_dur + sum(p.src_end - p.src_start for p in main)
@@ -184,11 +184,11 @@ def export_duration(project: Project) -> float:
     return sum(p.src_end - p.src_start for p in export_pieces(project, selection)[0])
 
 
-def _prepare(project: Project, selection: Selection, with_extras: bool = True):
+def _prepare(project: Project, selection: Selection, with_extras: bool = True, intro_ids: list[str] | None = None):
     preset = PRESETS[project.preset]
     try:
         if with_extras:
-            pieces, intro_dur = export_pieces(project, selection)
+            pieces, intro_dur = export_pieces(project, selection, intro_ids)
         else:
             pieces, intro_dur = selection_pieces(project.clips, selection), 0.0
     except ValueError:
@@ -242,11 +242,14 @@ def _unique_paths(out_dir: str, stem: str, ext: str) -> tuple[str, str]:
         n += 1
 
 
-def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=None) -> ExportResult:
+def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=None, *, selection: Selection | None = None,
+               intro_ids: list[str] | None = None, name_suffix: str = "", max_video_kbps: int | None = None) -> ExportResult:
+    """`selection`/`intro_ids`/`name_suffix`/`max_video_kbps` let the episode splitter render one episode:
+    its own range, its own intro clip, its own file name and a bitrate cap that keeps it under the size limit."""
     if not project.clips:
         raise ExportError("no_clips", "No clips in the project. Please add a clip first")
-    selection = project.selection or Selection(0.0, edited_duration(project.clips))
-    preset, pieces, rendered = _prepare(project, selection)
+    selection = selection or project.selection or Selection(0.0, edited_duration(project.clips))
+    preset, pieces, rendered = _prepare(project, selection, intro_ids=intro_ids)
     pieces, frames = _plan(pieces)
     if not pieces:
         raise ExportError("selection_invalid", "The selection is too short. Please choose a longer range")
@@ -256,7 +259,7 @@ def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=No
     report = progress_cb or (lambda p, m="": None)
     total = sum(p.src_end - p.src_start for p in pieces)
     ext = output_extension(project.export)
-    encoder = encoder_args(project.export, preset.name, total, source_video_kbps(project.clips))
+    encoder = encoder_args(project.export, preset.name, total, source_video_kbps(project.clips), max_video_kbps)
     out_name = f"out.{ext}"
     wd = _workdir(preset, project, rendered)
     try:
@@ -289,7 +292,7 @@ def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=No
             _ffmpeg(final, total, lambda f, m="": report(0.8 + 0.2 * f, m), cancel_event, wd)
         os.makedirs(out_dir, exist_ok=True)
         with _name_lock:
-            video, srt = _unique_paths(out_dir, f"{_safe_stem(project.clips[0].path)}_{preset.name}", ext)
+            video, srt = _unique_paths(out_dir, f"{_safe_stem(project.clips[0].path)}_{preset.name}{name_suffix}", ext)
             shutil.move(os.path.join(wd, out_name), video)
             Path(srt).write_text(to_srt(rendered), encoding="utf-8")
         return ExportResult(video, srt)
