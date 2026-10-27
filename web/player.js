@@ -95,8 +95,11 @@ export async function showClip(clipId) {
   const p = getProject();
   const clip = p.clips.find((c) => c.id === clipId);
   if (!clip) return;
-  const first = tm.enabledKeeps(clip)[0];
-  await loadClip(clipId, first ? first.start : 0);
+  const keeps = tm.enabledKeeps(clip);
+  const first = keeps[0];
+  // a cover fades its texts in, so its first frame is empty: open it near the end, when everything is on screen
+  const poster = (clip.role ?? "main") !== "main" && keeps.length ? Math.max(first.start, Math.min(keeps.at(-1).end - 0.1, first.start + (keeps.at(-1).end - first.start) * 0.75)) : null;
+  await loadClip(clipId, poster ?? (first ? first.start : 0));
   emit();
 }
 
@@ -186,7 +189,7 @@ export async function play(until = null) {
     const keeps = tm.enabledKeeps(loaded);
     if (!keeps.length) return;
     review = true;
-    if (video.currentTime >= keeps.at(-1).end - 0.05) video.currentTime = keeps[0].start;
+    if (!wantPlay) video.currentTime = keeps[0].start; // Play starts the cover from its beginning
     wantPlay = true;
     await video.play().catch(() => {});
     cancelAnimationFrame(raf);
