@@ -3,6 +3,7 @@
 import { api } from "./api.js";
 import { getProject, update, withSavedProject } from "./state.js";
 import { makeReel } from "./cut_tools.js";
+import { addToQueue } from "./queue_panel.js";
 import * as player from "./player.js";
 import { parseRanges } from "./ranges.js";
 import * as tm from "./timeline_math.js";
@@ -46,15 +47,22 @@ export function initHighlights() {
   }
 
   let shots = false;
-  const reelBtn = el("button", { id: "btn-make-reel", class: "primary", hidden: true, onclick: () => {
-    const picked = [...results.querySelectorAll(".hl-pick:checked")].map((b) => b.closest(".hl-row")).map((r) => ({ start: +r.dataset.start, end: +r.dataset.end }));
-    makeReel(picked);
+  const checkedRows = () => [...results.querySelectorAll(".hl-pick:checked")].map((b) => b.closest(".hl-row"));
+  const reelBtn = el("button", { id: "btn-make-reel", class: "primary", hidden: true, onclick: () => makeReel(checkedRows().map((r) => ({ start: +r.dataset.start, end: +r.dataset.end }))) });
+  const withExtras = el("input", { type: "checkbox", id: "hl-extras" });
+  const exportBtn = el("button", { id: "btn-export-highlights", hidden: true, title: "Each checked highlight becomes its own video file; they run one after another in the queue", onclick: async () => {
+    const ranges = checkedRows().map((r) => ({ start: +r.dataset.start, end: +r.dataset.end, label: r.dataset.cat }));
+    if (ranges.length) await addToQueue("highlights", { ranges, with_extras: withExtras.checked });
   } });
+  const exportBox = el("div", { class: "row", hidden: true }, el("label", { class: "row small" }, withExtras, el("span", {}, "Add the intro/outro clips to each")), exportBtn);
   const count = () => {
     const n = results.querySelectorAll(".hl-pick:checked").length;
-    reelBtn.hidden = !shots;
-    reelBtn.disabled = !n;
-    reelBtn.textContent = `Make reel from ${n} checked shot${n === 1 ? "" : "s"}`;
+    const any = results.querySelector(".hl-pick") !== null;
+    reelBtn.hidden = !any;
+    exportBox.hidden = exportBtn.hidden = !any;
+    reelBtn.disabled = exportBtn.disabled = !n;
+    reelBtn.textContent = `Make one reel from ${n} checked`;
+    exportBtn.textContent = `Export ${n} checked as separate clips`;
   };
 
   function show(cands, asShots = false) {
@@ -62,11 +70,11 @@ export function initHighlights() {
     results.replaceChildren(...ORDER.flatMap((cat) => {
       const rows = cands.filter((c) => c.category === cat);
       if (!rows.length) return [];
-      const all = el("input", { type: "checkbox", class: "hl-all", "aria-label": `Select all ${LABELS[cat]}`, checked: true,
+      const all = el("input", { type: "checkbox", class: "hl-all", "aria-label": `Select all ${LABELS[cat]}`, checked: shots,
         onchange: () => results.querySelectorAll(`.hl-row[data-cat="${cat}"] .hl-pick`).forEach((b) => { b.checked = all.checked; count(); }) });
-      return [el("div", { class: "row" }, shots ? all : "", el("h3", {}, `${LABELS[cat]} (${rows.length})`)),
+      return [el("div", { class: "row" }, all, el("h3", {}, `${LABELS[cat]} (${rows.length})`)),
         ...rows.map((c) => el("div", { class: "hl-row", "data-cat": cat, "data-start": c.start, "data-end": c.end },
-        el("div", { class: "row" }, shots ? el("input", { type: "checkbox", class: "hl-pick", checked: true, "aria-label": "Include this shot", onchange: count }) : "",
+        el("div", { class: "row" }, el("input", { type: "checkbox", class: "hl-pick", checked: shots, "aria-label": "Include this highlight", onchange: count }),
           el("strong", {}, `${fmtTime(c.start)} – ${fmtTime(c.end)}`),
           el("span", { class: "muted small" }, `${Math.round(c.end - c.start)} s${c.hits ? ` · ${c.hits} hits` : ""}`), el("span", { class: "spacer" }),
           el("button", { class: "ghost small", onclick: () => preview(c) }, "Preview"),
@@ -119,7 +127,7 @@ export function initHighlights() {
     el("h2", {}, "Find highlights"),
     el("p", { class: "muted small" }, "Needs subtitles. \"Find short shots\" lists every scolding / wake-up / funny moment of the whole clip so you can gather them into one reel. Scans for scolding, wake-up calls, laughter and energetic stretches, by words and loudness. Free, runs on this computer."),
     el("div", { class: "row" }, el("label", { class: "field" }, el("span", {}, "Min (s)"), minS), el("label", { class: "field" }, el("span", {}, "Max (s)"), maxS)),
-    scan, reelScan, wordBox, reelBtn, results,
+    scan, reelScan, wordBox, reelBtn, exportBox, results,
     el("h3", {}, "Let an AI choose"),
     el("p", { class: "muted small" }, "Copies the transcript with instructions. Paste it into Claude or another AI (it costs a few tokens of text, not video), then paste the answer back."),
     copyBtn, aiAnswer, readBtn);

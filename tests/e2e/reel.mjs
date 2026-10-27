@@ -28,6 +28,16 @@ try {
   must((await page.$$('.hl-row[data-cat="scold"]')).length === 4, "every scolding moment is listed as its own short shot");
   await page.locator('.hl-row[data-cat="scold"] .hl-pick').nth(3).uncheck();
   must((await page.textContent("#btn-make-reel")).includes("3 checked"), "unticking a shot updates the button");
+  // the same ticked shots can instead be exported, each as its own file, through the queue
+  must((await page.textContent("#btn-export-highlights")).includes("Export 3 checked"), "the export button counts the ticked highlights");
+  await page.click("#btn-export-highlights");
+  let q;
+  for (let i = 0; i < 120; i++) {
+    q = await (await fetch(`${app.base}/api/queue`)).json();
+    if (q.items.length && ["done", "error"].includes(q.items[0].state)) break;
+    await page.waitForTimeout(500);
+  }
+  must(q.items[0].state === "done" && q.items[0].result.files.length === 3, `3 separate highlight files were exported (${q.items[0].state})`);
   const total0 = await page.evaluate(async () => { const t = await import("/timeline_math.js"); const s = await import("/state.js"); return t.editedDuration(s.getProject().clips); });
   await page.click("#btn-make-reel");
   await page.waitForTimeout(900);

@@ -36,6 +36,15 @@ try {
   must(proj.clips.some((c) => c.id === mid && c.role === "main"), "the main clip is untouched");
   const tags = await page.$$eval(".role-tag", (els) => els.map((e) => e.textContent));
   must(tags.join("|") === "Intro for EP 1|Intro for EP 2", "the clip list labels them for EP 1 and EP 2: " + tags.join(" | "));
+  // vertical covers need no template: the template picker is hidden, an intro and an outro of 1080x1920 are drawn
+  await page.selectOption("#cover-format", "vertical");
+  must(!(await page.isVisible("#cover-template")) && await page.isVisible("#cover-outro-text"), "the vertical style hides the template picker and offers the back cover");
+  await page.fill("#cover-titles", "Vertical One");
+  await page.click("#btn-make-covers");
+  await page.waitForSelector(".toast:has-text('Made 1 cover')", { timeout: 120000 });
+  const vp = (await (await fetch(`${app.base}/api/project`)).json()).project;
+  const vc = vp.clips.filter((c) => c.role !== "main");
+  must(vc.map((c) => c.role).join() === "intro,outro" && vc.every((c) => c.width === 1080 && c.height === 1920), "a vertical intro and outro (1080x1920) were made");
   must(problems.length === 0, "no console errors" + (problems.length ? ": " + problems.join(" | ") : ""));
 } catch (e) {
   failed = true;

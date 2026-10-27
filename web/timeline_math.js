@@ -84,20 +84,34 @@ export function selectionPieces(clips, sel) {
   return out;
 }
 
-/** Edited-time span of a source-anchored subtitle, or null when it lies wholly in cut regions. */
-export function subtitleEditedSpan(clips, sub) {
+/** The edit's segments grouped per clip, built once so that many subtitles can be placed without rebuilding it each time. */
+export function spanIndex(clips) {
+  const by = new Map();
+  for (const g of segments(clips)) (by.get(g.clipId) ?? by.set(g.clipId, []).get(g.clipId)).push(g);
+  return by;
+}
+
+/**
+ * Edited-time span of a source-anchored subtitle, or null when it lies wholly in cut regions.
+ * Pass `index` (from spanIndex) when placing many subtitles in a row.
+ */
+export function subtitleEditedSpan(clips, sub, index = null) {
   const clip = clips.find((c) => c.id === sub.clip_id);
   if (!clip) return null;
-  const keeps = enabledKeeps(clip);
-  const first = keeps.find((k) => k.end > sub.src_start + EPS);
-  const last = [...keeps].reverse().find((k) => k.start < sub.src_end - EPS);
+  const segs = (index ?? spanIndex(clips)).get(clip.id) ?? [];
+  // segs are in source order: first keep ending after the subtitle starts, last keep starting before it ends
+  const firstAt = (pred) => { let lo = 0, hi = segs.length; while (lo < hi) { const m = (lo + hi) >> 1; if (pred(segs[m])) hi = m; else lo = m + 1; } return lo; };
+  const first = segs[firstAt((g) => g.keep.end > sub.src_start + EPS)];
+  const last = segs[firstAt((g) => g.keep.start >= sub.src_end - EPS) - 1];
   if (!first || !last) return null;
-  const start = Math.max(sub.src_start, first.start);
-  const end = Math.min(sub.src_end, last.end);
+  const start = Math.max(sub.src_start, first.keep.start);
+  const end = Math.min(sub.src_end, last.keep.end);
   if (end - start <= EPS) return null;
-  const es = sourceToEdited(clips, clip.id, start);
-  const ee = sourceToEdited(clips, clip.id, end);
-  if (es === null || ee === null || ee - es <= EPS) return null;
+  const at = (t) => { const g = segs[firstAt((x) => x.keep.end + EPS >= t)]; return g && g.keep.start - EPS <= t ? g : undefined; };
+  const gs = at(start), ge = at(end);
+  if (!gs || !ge) return null;
+  const es = gs.editedStart + (start - gs.keep.start), ee = ge.editedStart + (end - ge.keep.start);
+  if (ee - es <= EPS) return null;
   return [es, ee];
 }
 

@@ -27,7 +27,7 @@ const sizeText = (b) => `${(b / 1048576) >= 100 ? (b / 1048576).toFixed(0) : (b 
 function resultText(it) {
   const r = it.result;
   if (!r) return "";
-  if (r.files) return `${r.files.length} episode file(s) in ${r.dir}${r.files.some((f) => f.over_limit) ? " · some are over the size limit" : ""}`;
+  if (r.files) return `${r.files.length} ${r.kind === "highlights" ? "highlight" : "episode"} file(s) in ${r.dir}${r.files.some((f) => f.over_limit) ? " · some are over the size limit" : ""}`;
   return `${r.video} in ${r.dir}`;
 }
 

@@ -208,7 +208,8 @@ export function initSubtitles() {
     const p = getProject();
     if (!p) return; // not loaded yet
     toolRefs.clear();
-    const rows = p.subtitles.map((s) => ({ s, span: spanOf(s) }))
+    const index = tm.spanIndex(p.clips);
+    const rows = p.subtitles.map((s) => ({ s, span: tm.subtitleEditedSpan(p.clips, s, index) }))
       .sort((a, b) => (a.span ? a.span[0] : 1e9 + a.s.src_start) - (b.span ? b.span[0] : 1e9 + b.s.src_start));
     list.replaceChildren(...(rows.length ? rows.map(({ s, span }, i) => {
       const ta = el("textarea", { rows: 2, "aria-label": "Subtitle text" });
@@ -256,7 +257,7 @@ export function initSubtitles() {
       list.querySelectorAll(".sub-row").forEach((r) => r.classList.toggle("selected", r.dataset.id === ui.selectedSubId));
     } else if (why === "subs-pos") {
       syncTools();
-    } else if (why !== "subs-text" && !why.startsWith("ov-")) render();
+    } else if (!["subs-text", "selection", "confirm", "preset", "safezone", "style"].includes(why) && !why.startsWith("ov-")) render();
   });
   render();
   setSubtitleLane(paintLane, laneHandler);
@@ -274,8 +275,9 @@ function paintLane(ctx, w, h, xAt) {
   ctx.fillRect(0, LANE_TOP, w, h - LANE_TOP);
   ctx.font = "12px 'Leelawadee UI', Sarabun, system-ui, sans-serif";
   rects = [];
+  const index = tm.spanIndex(p.clips);
   for (const sub of p.subtitles) {
-    const span = spanOf(sub);
+    const span = tm.subtitleEditedSpan(p.clips, sub, index);
     if (!span) continue;
     const x0 = xAt(span[0], w), x1 = xAt(span[1], w);
     if (x1 < 0 || x0 > w) continue;

@@ -3,6 +3,7 @@ import copy
 import json
 import mimetypes
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -25,6 +26,7 @@ from core.autosub import generate_subtitles
 from core.encode import AUDIO_KBPS, _normalized, estimate_bytes, source_video_kbps, video_kbps
 from core.align import align as align_audio
 from core.cover import CoverError, render_cover, safe_stem, thai_date
+from core.vcover import DEFAULT_OUTRO_TEXT, render_vertical_cover
 from core.cutmap import pieces_from_dicts
 from core.episodes import plan_episodes
 from core.export import export_duration, manifest_path, render_preview_frame, run_export
@@ -40,7 +42,7 @@ from core.srt import parse_srt
 from core.srt_import import cues_to_subtitles
 from core.highlights import LEXICON, find_highlights, find_shots, lines_from_project, transcript_for_ai
 from core.timeline import main_clips
-from core.waveform import loudness_by_second, waveform_peaks
+from core.waveform import audio_profile, loudness_by_second, waveform_peaks
 from server import fake_whisper
 from server.errors import AppError, from_exception, payload
 from server.jobqueue import JobQueue
@@ -60,6 +62,7 @@ class State:
         self.home = home
         self.exports = os.path.join(home, "exports")
         self.proxies = os.path.join(home, "proxies")
+        self.audio_cache = os.path.join(home, "audio_cache")
         self.covers = os.path.join(home, "covers")
         self.manifests = os.path.join(home, "manifests")
         self.lock = threading.RLock()
@@ -234,11 +237,14 @@ def create_app(home: str | None = None) -> FastAPI:
                            "Try opening it in a video player first, or convert the file", e.details) from e
         clip = Clip(id=uuid.uuid4().hex[:8], path=path, duration=info["duration"], width=info["width"],
                     height=info["height"], fps=info["fps"], has_audio=info["has_audio"],
-                    keeps=[Keep(0.0, info["duration"])])
+                    keeps=[Keep(0.0, info["duration"])],
+                    cuts_confirmed=True)  # nothing to review until dead air is detected: an already-edited file goes straight on
         with st.lock:
             st.project.clips.append(clip)
             st.project.rev += 1
             st.save()
+        # decode the audio overview now, in the background, so the waveform and the highlight scan are instant later
+        threading.Thread(target=lambda: audio_profile(path, st.audio_cache), daemon=True).start()
         job = None
         if not is_browser_playable(info):
             os.makedirs(st.proxies, exist_ok=True)
@@ -287,7 +293,7 @@ def create_app(home: str | None = None) -> FastAPI:
         clip = st.clip(clip_id)
         key = (clip_id, points)
         if key not in st.waveforms:
-            st.waveforms[key] = waveform_peaks(clip.path, points)
+            st.waveforms[key] = waveform_peaks(clip.path, points, st.audio_cache)
         return {"peaks": st.waveforms[key]}
 
     @app.get("/media/{clip_id}")
@@ -379,7 +385,7 @@ def create_app(home: str | None = None) -> FastAPI:
         for c in main_clips(snap.clips):
             key = (c.id, c.path)
             if key not in st.loudness:
-                st.loudness[key] = loudness_by_second(c.path)
+                st.loudness[key] = loudness_by_second(c.path, st.audio_cache)
             per_s = st.loudness[key]
             for k in enabled_keeps(c):
                 out += per_s[int(k.start): max(int(k.start) + 1, int(round(k.end)))]
@@ -557,11 +563,14 @@ def create_app(home: str | None = None) -> FastAPI:
             if not t or len(t) > 120:
                 raise AppError("covers_invalid", "Each title must be 1–120 characters")
             titles.append((t, str(it.get("date_text") or "").strip()))
-        if body.get("template_clip_id"):
+        vertical = body.get("format") == "vertical"
+        if vertical:
+            template = ""   # drawn from scratch: there is no vertical original to copy
+        elif body.get("template_clip_id"):
             template = st.clip(str(body["template_clip_id"])).path
         else:
             template = os.path.abspath(str(body.get("template_path", "")))
-        if not os.path.isfile(template):
+        if not vertical and not os.path.isfile(template):
             raise AppError("file_missing", "Template file not found", "Choose the cover clip to copy the look from", template, status=404)
         default_date = str(body.get("date_text") or "").strip()
         if not default_date:
@@ -579,30 +588,43 @@ def create_app(home: str | None = None) -> FastAPI:
             made = []
             for i, (title, date_text) in enumerate(titles):
                 progress(i / len(titles), f"Cover {i + 1}/{len(titles)}: {title}")
-                stem, n = safe_stem(title), 1
+                stem, n = safe_stem(title) + ("_vertical" if vertical else ""), 1
                 while os.path.exists(os.path.join(st.covers, f"{stem}{'' if n == 1 else f'_{n}'}.mp4")):
                     n += 1
                 out = os.path.join(st.covers, f"{stem}{'' if n == 1 else f'_{n}'}.mp4")
                 try:
-                    render_cover(template, title, date_text or default_date, out, title_font=title_font, date_font=date_font, cancel=cancel)
+                    if vertical:
+                        render_vertical_cover("intro", out, title=title, date_text=date_text or default_date, title_font=title_font,
+                                              date_font=date_font, cancel=cancel)
+                    else:
+                        render_cover(template, title, date_text or default_date, out, title_font=title_font, date_font=date_font, cancel=cancel)
                 except CoverError as e:
                     raise AppError(e.code, e.message, "", e.details) from e
                 made.append(out)
+            outro_file = None
+            if vertical and body.get("with_outro"):
+                outro_file = os.path.join(st.covers, "THUS_outro_vertical.mp4")
+                try:
+                    render_vertical_cover("outro", outro_file, outro_text=str(body.get("outro_text") or DEFAULT_OUTRO_TEXT)[:300],
+                                          date_font=date_font, cancel=cancel)
+                except CoverError as e:
+                    raise AppError(e.code, e.message, "", e.details) from e
             clips = []
-            for out in made:
+            for out, role in [(m, "intro") for m in made] + ([(outro_file, "outro")] if outro_file else []):
                 info = probe(out)
                 clips.append(Clip(id=uuid.uuid4().hex[:8], path=out, duration=info["duration"], width=info["width"], height=info["height"],
-                                  fps=info["fps"], has_audio=info["has_audio"], keeps=[Keep(0.0, info["duration"])], role="intro"))
+                                  fps=info["fps"], has_audio=info["has_audio"], keeps=[Keep(0.0, info["duration"])], role=role))
             with st.lock:
                 if replace:
-                    gone = {c.id for c in st.project.clips if c.role == "intro"}
+                    roles = {"intro"} | ({"outro"} if outro_file else set())
+                    gone = {c.id for c in st.project.clips if c.role in roles}
                     st.project.clips = [c for c in st.project.clips if c.id not in gone]
                     st.project.subtitles = [s for s in st.project.subtitles if s.clip_id not in gone]
                 st.project.clips.extend(clips)
                 st.project.rev += 1
                 st.save()
             progress(1.0, "Done")
-            return {"count": len(clips), "dir": st.covers, "names": [os.path.basename(p) for p in made]}
+            return {"count": len(made), "dir": st.covers, "names": [os.path.basename(p) for p in made], "outro": bool(outro_file)}
         return {"job": st.jobs.submit(work, "covers")}
 
     # ---- split into episodes (each under a size limit, own intro, shared outro) ---------------------
@@ -670,6 +692,41 @@ def create_app(home: str | None = None) -> FastAPI:
         return {"files": files, "dir": out_dir, "limit_mb": max_mb,
                 "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
 
+    def run_highlight_set(snap: Project, ranges: list[dict], with_extras: bool, progress, cancel) -> dict:
+        """One finished file per picked highlight, each cut from the same edit with the same style."""
+        out_dir = snap.export.out_dir or st.exports
+        total = sum(r["end"] - r["start"] for r in ranges)
+        given = (snap.export.filename or "").strip()
+        files, done = [], 0.0
+        for i, r in enumerate(ranges, 1):
+            base, span = done / total, (r["end"] - r["start"]) / total
+
+            def report(f, m="", base=base, span=span, i=i):
+                progress(base + span * f, f"Highlight {i}/{len(ranges)} · {m}" if m else f"Highlight {i}/{len(ranges)}")
+            label = re.sub(r"[^A-Za-z0-9]+", "", r.get("label") or "")
+            res = run_export(snap, out_dir, report, cancel, selection=Selection(r["start"], r["end"]),
+                             intro_ids=None if with_extras else [], with_extras=with_extras, manifest_dir=st.manifests,
+                             name_suffix=f"_HL{i:02d}{('_' + label) if label else ''}", name=f"{given}_HL{i:02d}" if given else None)
+            files.append({"video": os.path.basename(res.video), "bytes": os.path.getsize(res.video)})
+            done += r["end"] - r["start"]
+        return {"files": files, "dir": out_dir, "kind": "highlights",
+                "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
+
+    def clean_ranges(snap: Project, raw) -> list[dict]:
+        total = edited_duration(snap.clips)
+        out = []
+        for r in raw or []:
+            try:
+                a, b = float(r["start"]), float(r["end"])
+            except (KeyError, TypeError, ValueError):
+                raise AppError("highlights_invalid", "A highlight range is not valid", "Pick the highlights again") from None
+            a, b = max(0.0, a), min(total, b)
+            if b - a >= 0.5:
+                out.append({"start": a, "end": b, "label": str(r.get("label") or "")[:30]})
+        if not out or len(out) > 100:
+            raise AppError("highlights_invalid", "Pick between 1 and 100 highlights inside the timeline", "Pick the highlights again")
+        return out
+
     # ---- the job queue: long jobs that run one after another and survive closing the app ------------
     def queue_export(project_dict: dict, params: dict, progress, cancel) -> dict:
         return run_single_export(project_from_dict(project_dict), progress, cancel)
@@ -679,7 +736,11 @@ def create_app(home: str | None = None) -> FastAPI:
         max_mb = float(params.get("max_mb", 500))
         return run_episode_set(snap, prepare_episodes(snap, max_mb, params.get("intro_ids"), params.get("measured_kbps")), max_mb, progress, cancel)
 
-    st.queue = JobQueue(st.home, {"export": queue_export, "episodes": queue_episodes},
+    def queue_highlights(project_dict: dict, params: dict, progress, cancel) -> dict:
+        snap = project_from_dict(project_dict)
+        return run_highlight_set(snap, clean_ranges(snap, params.get("ranges")), bool(params.get("with_extras", False)), progress, cancel)
+
+    st.queue = JobQueue(st.home, {"export": queue_export, "episodes": queue_episodes, "highlights": queue_highlights},
                         busy=lambda: st.jobs.active(ignore=("proxy",)) > 0)
     st.queue.start()  # items left over from the last run (when the app was closed) continue now
 
@@ -698,8 +759,8 @@ def create_app(home: str | None = None) -> FastAPI:
     @app.post("/api/queue")
     def post_queue(body: dict):
         kind = str(body.get("kind", ""))
-        if kind not in ("export", "episodes"):
-            raise AppError("queue_invalid", "This can't be queued", "Only exports and episode batches can be queued")
+        if kind not in ("export", "episodes", "highlights"):
+            raise AppError("queue_invalid", "This can't be queued", "Only exports, episode batches and highlight batches can be queued")
         params = dict(body.get("params") or {})
         preset = params.get("preset")
         if preset is not None and preset not in PRESETS:
@@ -716,6 +777,9 @@ def create_app(home: str | None = None) -> FastAPI:
             except ValueError as e:
                 raise from_exception(e) from e
             label = f"Export · {describe(snap)}"
+        elif kind == "highlights":
+            params["ranges"] = clean_ranges(snap, params.get("ranges"))   # validates now, and drops anything outside the timeline
+            label = f"{len(params['ranges'])} highlight clips · {describe(snap).split(' · ')[0]}"
         else:
             prepare_episodes(copy.deepcopy(snap), float(params.get("max_mb", 500)), params.get("intro_ids"), params.get("measured_kbps"))  # validates now
             label = f"Episodes (≤ {float(params.get('max_mb', 500)):g} MB) · {describe(snap)}"

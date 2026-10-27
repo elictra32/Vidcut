@@ -79,8 +79,9 @@ function render() {
   const t = player.getTime();
   const scale = frame.clientWidth / preset().width;
   const spans = new Map();
+  const index = tm.spanIndex(p.clips);
   const active = p.subtitles.filter((s) => {
-    const span = tm.subtitleEditedSpan(p.clips, s);
+    const span = tm.subtitleEditedSpan(p.clips, s, index);
     if (span) spans.set(s.id, span);
     return span && t >= span[0] - 1e-6 && t < span[1];
   });

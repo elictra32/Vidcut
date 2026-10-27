@@ -572,6 +572,11 @@ def test_export_job_uses_the_chosen_container_and_folder(client, tmp_path):
     assert os.path.exists(os.path.join(j["result"]["dir"], j["result"]["video"]))
 
 
+def test_a_new_clip_needs_no_review_until_dead_air_is_detected(client, tmp_path):
+    added = add_clip(client, make_clip(str(tmp_path / "a.mp4"), SPEC))
+    assert added["clip"]["cuts_confirmed"] is True and get_project(client)["clips"][0]["cuts_confirmed"] is True
+
+
 def test_cuts_confirmed_is_client_owned_and_reset_by_detection(client, tmp_path):
     path = make_clip(str(tmp_path / "a.mp4"), SPEC)
     added = add_clip(client, path)
@@ -873,6 +878,24 @@ def test_queue_exports_run_in_order_from_frozen_snapshots(client, tmp_path):
     assert client.post("/api/queue/clear-finished").json()["removed"] == 2
 
 
+def test_several_highlights_export_as_separate_files_in_one_queue_item(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "h.mp4"), [("tone", 10)], size="320x180"))
+    out = str(tmp_path / "hout")
+    client.post("/api/export-folder", json={"path": out})
+    bad = client.post("/api/queue", json={"kind": "highlights", "params": {"ranges": []}}).json()
+    assert bad["error"]["code"] == "highlights_invalid"
+    ranges = [{"start": 1, "end": 3, "label": "Scolding"}, {"start": 5, "end": 8, "label": "Wake-up call"}, {"start": 9, "end": 99}]
+    item = client.post("/api/queue", json={"kind": "highlights", "params": {"ranges": ranges}}).json()
+    assert item["label"].startswith("3 highlight clips")
+    q = wait_queue(client, lambda q: q["items"] and q["items"][0]["state"] in ("done", "error"))
+    it = q["items"][0]
+    assert it["state"] == "done", it
+    files = [f["video"] for f in it["result"]["files"]]
+    assert len(files) == 3 and len(set(files)) == 3 and "_HL01_Scolding" in files[0] and "_HL02_Wakeupcall" in files[1]
+    durs = [media.probe(os.path.join(out, f))["duration"] for f in files]
+    assert durs[0] == pytest.approx(2.0, abs=0.3) and durs[1] == pytest.approx(3.0, abs=0.3) and durs[2] == pytest.approx(1.0, abs=0.3)
+
+
 def test_queue_validates_when_adding_not_when_running(client, tmp_path):
     assert client.post("/api/queue", json={"kind": "export"}).json()["error"]["code"] == "no_clips"
     add_clip(client, make_clip(str(tmp_path / "v.mp4"), [("tone", 4)], size="320x180"))
@@ -954,3 +977,14 @@ def test_picking_another_brand_logo_replaces_the_old_one_in_place(client):
     assert overlays[0]["path"].endswith("THUS_symbol_black.png")
     client.post("/api/overlays", json={"brand": "THUS_lockup_white.png"})       # without 'replace' a logo is simply added
     assert len(get_project(client)["overlays"]) == 2
+
+
+def test_vertical_covers_are_drawn_without_a_template_and_the_outro_replaces_the_old_one(client, tmp_path):
+    r = client.post("/api/covers", json={"format": "vertical", "items": [{"title": "Candlestick Pattern P1"}, {"title": "ตื่นได้แล้ว ตอน 2"}],
+                                         "date_text": "วันที่ 22 ตุลาคม  2569", "with_outro": True}).json()
+    done = wait_job(client, r["job"], timeout=180)
+    assert done["state"] == "done" and done["result"]["count"] == 2 and done["result"]["outro"] is True
+    clips = get_project(client)["clips"]
+    assert [c["role"] for c in clips] == ["intro", "intro", "outro"]
+    assert all((c["width"], c["height"]) == (1080, 1920) and 2.5 < c["duration"] < 3.5 and c["has_audio"] for c in clips)
+    assert done["result"]["names"][0].endswith("_vertical.mp4")

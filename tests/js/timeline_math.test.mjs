@@ -154,3 +154,21 @@ test("upcomingBoundary: touching keeps continue without a jump", () => {
 test("upcomingBoundary skips intro/outro clips like nextPlayTarget does", () => {
   assert.deepEqual(tm.upcomingBoundary(clipsFor("roles"), "c1", 25), { at: 30, target: { kind: "end" } });
 });
+
+test("subtitleEditedSpan with a prebuilt index gives the same answer as without, for many random cases", () => {
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let n = 0; n < 200; n++) {
+    let t = 0;
+    const keeps = Array.from({ length: 1 + Math.floor(rnd() * 8) }, () => {
+      const start = t + rnd() * 5, end = start + 0.5 + rnd() * 6; t = end;
+      return { start, end, enabled: rnd() > 0.2 };
+    });
+    const clips = [{ id: "a", role: "main", keeps }];
+    const index = tm.spanIndex(clips);
+    for (let k = 0; k < 20; k++) {
+      const a = rnd() * (t + 3), sub = { clip_id: "a", src_start: a, src_end: a + 0.2 + rnd() * 5 };
+      assert.deepEqual(tm.subtitleEditedSpan(clips, sub, index), tm.subtitleEditedSpan(clips, sub));
+    }
+  }
+});

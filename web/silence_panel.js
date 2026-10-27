@@ -34,5 +34,5 @@ export function initSilencePanel() {
     }
   } }, "Detect and cut dead air");
   root.replaceChildren(el("h2", {}, "Cut dead air"), ...rows, run,
-    el("p", { class: "muted small" }, "Applies to the selected clip only. Review or adjust each section in the “Review cuts” bar below"));
+    el("p", { class: "muted small" }, "Optional: skip this for a file that is already edited, and go straight to subtitles. Applies to the selected clip only. Review or adjust each section in the “Review cuts” bar below"));
 }
