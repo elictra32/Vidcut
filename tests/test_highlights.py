@@ -48,3 +48,29 @@ def test_empty_input_and_transcript_export():
     assert find_highlights([]) == []
     t = transcript_for_ai([Line(65.0, 70.0, "สวัสดี"), Line(3700.0, 3705.0, "ลาก่อน")])
     assert "[01:05] สวัสดี" in t and "[1:01:40] ลาก่อน" in t and "MM:SS-MM:SS" in t
+
+
+def test_shots_gather_every_scolding_moment_not_just_the_best_few():
+    from core.highlights import find_shots
+    texts = []
+    for _ in range(8):  # eight scolding bursts spread through the video
+        texts += ["เรียนเรื่องบัญชี"] * 10 + ["ทำไมโง่แบบนี้", "ไอ้ขี้เกียจ"]
+    shots = [s for s in find_shots(mk(texts)) if s.category == "scold"]
+    assert len(shots) == 8 and all(s.label == "Scolding" for s in shots)
+    assert [s.start for s in shots] == sorted(s.start for s in shots)
+    assert all(3 <= s.duration <= 20 for s in shots)
+
+
+def test_close_hits_join_into_one_shot_and_far_ones_stay_apart():
+    from core.highlights import find_shots
+    texts = ["ปกติ"] * 5 + ["โง่", "ควาย"] + ["ปกติ"] * 10 + ["เหี้ย"] + ["ปกติ"] * 3
+    shots = [s for s in find_shots(mk(texts)) if s.category == "scold"]
+    assert len(shots) == 2 and shots[0].hits == 2 and shots[1].hits == 1
+    assert shots[0].start == 25 - 1.5 and shots[0].end == 35 - 0.5 + 1.5
+
+
+def test_shots_are_clamped_to_the_video_and_nothing_found_gives_nothing():
+    from core.highlights import find_shots
+    s = find_shots(mk(["โง่"] + ["ปกติ"] * 3))[0]
+    assert s.start == 0 and s.end <= 20
+    assert find_shots(mk(["ปกติ"] * 5)) == [] and find_shots([]) == []

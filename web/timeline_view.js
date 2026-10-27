@@ -17,6 +17,7 @@ const MIN_SPAN = 2;
 let canvas;
 let view = { start: 0, end: 60 };
 let drag = null;
+let thumb = null;
 
 const total = () => tm.editedDuration(getProject().clips);
 const timeAt = (x) => view.start + (x / canvas.getBoundingClientRect().width) * (view.end - view.start);
@@ -52,9 +53,19 @@ function tickStep(span) {
   return 3600;
 }
 
+/** Scrollbar under the canvas: the thumb is the part of the whole edit that is in view. */
+function syncScrollbar() {
+  if (!thumb) return;
+  const tot = Math.max(total(), MIN_SPAN), span = view.end - view.start;
+  thumb.parentNode.classList.toggle("full", span >= tot - 1e-6);
+  thumb.style.left = `${(view.start / tot) * 100}%`;
+  thumb.style.width = `${Math.max(2, (span / tot) * 100)}%`;
+}
+
 const draw = rafThrottle(() => {
   const p = getProject();
   if (!canvas || !p) return;
+  syncScrollbar();
   const { ctx, w, h } = fitCanvas(canvas);
   ctx.fillStyle = cssVar("--panel-2");
   ctx.fillRect(0, 0, w, h);
@@ -164,7 +175,24 @@ export function initTimelineView() {
     el("button", { class: "ghost", onclick: () => zoom(0.5, player.getTime()) }, "Zoom in"),
     el("button", { class: "ghost", onclick: () => zoom(2, player.getTime()) }, "Zoom out"),
     el("button", { class: "ghost", onclick: fitView }, "Fit"));
-  wrap.replaceChildren(bar, canvas);
+  thumb = el("div", { class: "tl-thumb", title: "Drag to scroll the timeline sideways" });
+  const track = el("div", { class: "tl-scroll", "aria-label": "Timeline scroll" }, thumb);
+  const panTo = (start) => { const span = view.end - view.start; view = { start, end: start + span }; clampView(); draw(); };
+  thumb.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    thumb.setPointerCapture(e.pointerId);
+    const x0 = e.clientX, s0 = view.start, tot = Math.max(total(), MIN_SPAN), w = track.getBoundingClientRect().width;
+    const move = (ev) => panTo(s0 + ((ev.clientX - x0) / w) * tot);
+    const up = () => { thumb.removeEventListener("pointermove", move); thumb.removeEventListener("pointerup", up); };
+    thumb.addEventListener("pointermove", move);
+    thumb.addEventListener("pointerup", up);
+  });
+  track.addEventListener("pointerdown", (e) => { // a click beside the thumb jumps there
+    if (e.target !== track) return;
+    const r = track.getBoundingClientRect(), tot = Math.max(total(), MIN_SPAN);
+    panTo(((e.clientX - r.left) / r.width) * tot - (view.end - view.start) / 2);
+  });
+  wrap.replaceChildren(bar, canvas, track);
 
   canvas.addEventListener("pointerdown", (e) => {
     if (!total()) return;

@@ -119,6 +119,53 @@ def find_highlights(lines: list[Line], loudness: list[float] | None = None, *, m
     return out
 
 
+def find_shots(lines: list[Line], loudness: list[float] | None = None, *, categories=("scold", "wisdom", "funny"),
+               lexicon: dict[str, list[str]] | None = None, pad_s: float = 1.5, merge_gap_s: float = 6.0, min_hits: int = 1,
+               min_len: float = 3.0, max_len: float = 45.0, limit: int = 300) -> list[Candidate]:
+    """EVERY short stretch around telling words, for gathering a reel ("all the scolding in the video"): lines that contain
+    the words, joined when they are close together, with a little padding either side. Returned in time order."""
+    lex = {k: (lexicon or {}).get(k, LEXICON[k]) for k in LEXICON}
+    if not lines:
+        return []
+    total = lines[-1].end
+    mean_loud = (sum(loudness) / len(loudness)) if loudness else 0.0
+
+    def loud_factor(a, b):
+        if not loudness or mean_loud <= 0:
+            return 1.0
+        seg = loudness[int(a): max(int(a) + 1, int(math.ceil(b)))]
+        return min(2.0, max(0.5, (sum(seg) / len(seg)) / mean_loud)) if seg else 1.0
+
+    out: list[Candidate] = []
+    for cat in categories:
+        if cat not in lex:
+            continue
+        clusters: list[list[tuple[Line, int]]] = []
+        for ln in lines:
+            hits = count_hits(ln.text, lex[cat])
+            if not hits:
+                continue
+            cur = clusters[-1] if clusters else None
+            if cur and ln.start - cur[-1][0].end <= merge_gap_s and ln.end - cur[0][0].start <= max_len:
+                cur.append((ln, hits))
+            else:
+                clusters.append([(ln, hits)])
+        found = []
+        for cl in clusters:
+            n_hits = sum(h for _, h in cl)
+            if n_hits < min_hits:
+                continue
+            a, b = max(0.0, cl[0][0].start - pad_s), min(total, cl[-1][0].end + pad_s)
+            if b - a < min_len:  # a one-word shot still needs a moment of context
+                mid = (a + b) / 2
+                a, b = max(0.0, mid - min_len / 2), min(total, mid + min_len / 2)
+            text = " ".join(ln.text for ln in lines if ln.end > a and ln.start < b)
+            found.append(Candidate(a, b, cat, n_hits / ((b - a) / 60) * loud_factor(a, b), n_hits, text, LABELS[cat]))
+        best = sorted(found, key=lambda c: -c.score)[:limit]
+        out += sorted(best, key=lambda c: c.start)
+    return out
+
+
 def transcript_for_ai(lines: list[Line]) -> str:
     def mmss(t):
         h, rem = divmod(int(t), 3600)

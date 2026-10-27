@@ -2,6 +2,7 @@
 // (copy the transcript with a ready prompt, paste its answer back).
 import { api } from "./api.js";
 import { getProject, update, withSavedProject } from "./state.js";
+import { makeReel } from "./cut_tools.js";
 import * as player from "./player.js";
 import { parseRanges } from "./ranges.js";
 import * as tm from "./timeline_math.js";
@@ -44,18 +45,36 @@ export function initHighlights() {
     }
   }
 
-  function show(cands) {
+  let shots = false;
+  const reelBtn = el("button", { id: "btn-make-reel", class: "primary", hidden: true, onclick: () => {
+    const picked = [...results.querySelectorAll(".hl-pick:checked")].map((b) => b.closest(".hl-row")).map((r) => ({ start: +r.dataset.start, end: +r.dataset.end }));
+    makeReel(picked);
+  } });
+  const count = () => {
+    const n = results.querySelectorAll(".hl-pick:checked").length;
+    reelBtn.hidden = !shots;
+    reelBtn.disabled = !n;
+    reelBtn.textContent = `Make reel from ${n} checked shot${n === 1 ? "" : "s"}`;
+  };
+
+  function show(cands, asShots = false) {
+    shots = asShots;
     results.replaceChildren(...ORDER.flatMap((cat) => {
       const rows = cands.filter((c) => c.category === cat);
       if (!rows.length) return [];
-      return [el("h3", {}, LABELS[cat]), ...rows.map((c) => el("div", { class: "hl-row", "data-cat": cat },
-        el("div", { class: "row" }, el("strong", {}, `${fmtTime(c.start)} – ${fmtTime(c.end)}`),
+      const all = el("input", { type: "checkbox", class: "hl-all", "aria-label": `Select all ${LABELS[cat]}`, checked: true,
+        onchange: () => results.querySelectorAll(`.hl-row[data-cat="${cat}"] .hl-pick`).forEach((b) => { b.checked = all.checked; count(); }) });
+      return [el("div", { class: "row" }, shots ? all : "", el("h3", {}, `${LABELS[cat]} (${rows.length})`)),
+        ...rows.map((c) => el("div", { class: "hl-row", "data-cat": cat, "data-start": c.start, "data-end": c.end },
+        el("div", { class: "row" }, shots ? el("input", { type: "checkbox", class: "hl-pick", checked: true, "aria-label": "Include this shot", onchange: count }) : "",
+          el("strong", {}, `${fmtTime(c.start)} – ${fmtTime(c.end)}`),
           el("span", { class: "muted small" }, `${Math.round(c.end - c.start)} s${c.hits ? ` · ${c.hits} hits` : ""}`), el("span", { class: "spacer" }),
           el("button", { class: "ghost small", onclick: () => preview(c) }, "Preview"),
           el("button", { class: "small", onclick: () => useRange(c) }, "Use as In/Out")),
         el("div", { class: "muted small hl-text" }, c.text || ""))) ];
     }));
     if (!cands.length) results.replaceChildren(el("p", { class: "muted small" }, "Nothing found."));
+    count();
   }
 
   const scan = el("button", { id: "btn-scan-hl", class: "primary", onclick: async () => {
@@ -65,6 +84,14 @@ export function initHighlights() {
       show(r.candidates);
     } catch (e) { showError(e); }
   } }, "Scan subtitles");
+
+  const reelScan = el("button", { id: "btn-scan-shots", onclick: async () => {
+    try {
+      const r = await withSavedProject(() => api("POST", "/api/highlights", { mode: "shots", lexicon: lexicon() }));
+      show(r.candidates, true);
+      showToast(`${r.candidates.length} short shots found. Untick any you don't want, then make the reel.`, "info", 5000);
+    } catch (e) { showError(e); }
+  } }, "Find short shots (for a reel)");
 
   const copyBtn = el("button", { id: "btn-copy-transcript", onclick: async () => {
     try {
@@ -90,9 +117,9 @@ export function initHighlights() {
 
   root.replaceChildren(
     el("h2", {}, "Find highlights"),
-    el("p", { class: "muted small" }, "Needs subtitles. Scans for scolding, wake-up calls, laughter and energetic stretches, by words and loudness. Free, runs on this computer."),
+    el("p", { class: "muted small" }, "Needs subtitles. \"Find short shots\" lists every scolding / wake-up / funny moment of the whole clip so you can gather them into one reel. Scans for scolding, wake-up calls, laughter and energetic stretches, by words and loudness. Free, runs on this computer."),
     el("div", { class: "row" }, el("label", { class: "field" }, el("span", {}, "Min (s)"), minS), el("label", { class: "field" }, el("span", {}, "Max (s)"), maxS)),
-    scan, wordBox, results,
+    scan, reelScan, wordBox, reelBtn, results,
     el("h3", {}, "Let an AI choose"),
     el("p", { class: "muted small" }, "Copies the transcript with instructions. Paste it into Claude or another AI (it costs a few tokens of text, not video), then paste the answer back."),
     copyBtn, aiAnswer, readBtn);

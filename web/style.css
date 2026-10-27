@@ -179,3 +179,8 @@ button.danger { color: #ff8a8a; }
   background: #c0392b; color: #fff; border: 1px solid #fff8; cursor: pointer; display: none; }
 .ov.selected .ov-del, .ov:hover .ov-del { display: block; }
 .brand-tile.active { outline: 2px solid var(--accent, #2dd4a7); }
+
+.tl-scroll { position: relative; height: 12px; margin-top: 4px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.tl-scroll.full { opacity: 0.4; }
+.tl-thumb { position: absolute; top: 1px; bottom: 1px; min-width: 14px; background: var(--muted); border-radius: 5px; cursor: grab; }
+.hl-row .hl-pick, .hl-all { margin-right: 6px; }

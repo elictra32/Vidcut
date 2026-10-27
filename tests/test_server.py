@@ -687,6 +687,8 @@ def test_highlights_find_the_scolding_part_and_export_a_transcript(client, tmp_p
     assert scold and scold[0]["start"] <= 24 and scold[0]["end"] >= 30 and "scold" in r["lexicon"]
     t = client.get("/api/highlights/transcript").json()
     assert t["lines"] == len(texts) and "[00:24]" in t["text"]
+    shots = client.post("/api/highlights", json={"mode": "shots"}).json()["candidates"]
+    assert [c["category"] for c in shots] == ["scold"] and shots[0]["duration"] < 20     # one short shot, not a 15-30 s window
 
 
 # ---- captions for an original video, applied to its cut version ------------------------------------------------

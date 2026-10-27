@@ -34,3 +34,22 @@ export function removeRange(keeps, a, b) {
   }
   return touched ? out.sort(byStart) : null;
 }
+
+/** Keep only the source ranges `ranges` ([{start,end}]): enabled parts outside them become disabled keeps (restorable). */
+export function keepOnly(keeps, ranges) {
+  const rs = ranges.filter((r) => r.end - r.start > MIN_PART).sort((a, b) => a.start - b.start);
+  const out = [];
+  for (const k of keeps) {
+    if (!k.enabled) { out.push({ ...k }); continue; }
+    let at = k.start;
+    for (const r of rs) {
+      const a = Math.max(r.start, k.start), b = Math.min(r.end, k.end);
+      if (b - a <= 1e-9) continue;
+      if (a - at > 1e-9) out.push({ start: at, end: a, enabled: false });
+      out.push({ start: a, end: b, enabled: true });
+      at = b;
+    }
+    if (k.end - at > 1e-9) out.push({ start: at, end: k.end, enabled: false });
+  }
+  return out.sort(byStart);
+}

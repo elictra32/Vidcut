@@ -38,7 +38,7 @@ from core.rewrap import rewrap_subtitles
 from core.sizing import measure
 from core.srt import parse_srt
 from core.srt_import import cues_to_subtitles
-from core.highlights import LEXICON, find_highlights, lines_from_project, transcript_for_ai
+from core.highlights import LEXICON, find_highlights, find_shots, lines_from_project, transcript_for_ai
 from core.timeline import main_clips
 from core.waveform import loudness_by_second, waveform_peaks
 from server import fake_whisper
@@ -395,8 +395,12 @@ def create_app(home: str | None = None) -> FastAPI:
             raise AppError("no_subtitles", "There are no subtitles to analyse",
                            "Generate or import subtitles first (for the part you want to scan)")
         lexicon = {k: [str(w) for w in v] for k, v in (body.get("lexicon") or {}).items() if k in LEXICON}
-        cands = find_highlights(lines, edited_loudness(snap), min_s=float(body.get("min_s", 30)), max_s=float(body.get("max_s", 90)),
-                                per_category=int(body.get("per_category", 5)), lexicon=lexicon or None)
+        if body.get("mode") == "shots":   # every short moment around the telling words, for a highlight reel
+            cands = find_shots(lines, edited_loudness(snap), lexicon=lexicon or None, pad_s=float(body.get("pad_s", 1.5)),
+                               merge_gap_s=float(body.get("merge_gap_s", 6)), min_hits=int(body.get("min_hits", 1)))
+        else:
+            cands = find_highlights(lines, edited_loudness(snap), min_s=float(body.get("min_s", 30)), max_s=float(body.get("max_s", 90)),
+                                    per_category=int(body.get("per_category", 5)), lexicon=lexicon or None)
         return {"candidates": [{"start": c.start, "end": c.end, "duration": c.duration, "category": c.category, "label": c.label,
                                 "score": round(c.score, 2), "hits": c.hits, "text": c.text[:160]} for c in cands],
                 "lexicon": {k: lexicon.get(k, LEXICON[k]) for k in LEXICON}}

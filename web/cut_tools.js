@@ -3,7 +3,7 @@ import { getProject, updateKeeps } from "./state.js";
 import * as player from "./player.js";
 import * as tm from "./timeline_math.js";
 import { showToast } from "./toast.js";
-import { deleteKeepAt, removeRange, splitKeeps } from "./cut_ops.js";
+import { deleteKeepAt, keepOnly, removeRange, splitKeeps } from "./cut_ops.js";
 
 function apply(clipId, keeps, done) {
   updateKeeps((p) => { p.clips.find((c) => c.id === clipId).keeps = keeps; });
@@ -45,4 +45,27 @@ export function cutOutSelection() {
   if (!edits.size) return showToast("Nothing to cut out in that range", "error");
   updateKeeps((q) => { for (const [id, keeps] of edits) q.clips.find((c) => c.id === id).keeps = keeps; });
   showToast("Cut out the selected range. Ctrl+Z brings it back.", "info", 3000);
+}
+
+/** Highlight reel: leave only these edited-time shots ([{start,end}]) on the timeline; everything else stays restorable. */
+export function makeReel(shots) {
+  const p = getProject();
+  const merged = [];
+  for (const s of [...shots].sort((a, b) => a.start - b.start)) {
+    const last = merged[merged.length - 1];
+    if (last && s.start <= last.end + 1e-6) last.end = Math.max(last.end, s.end); else merged.push({ ...s });
+  }
+  const total = tm.editedDuration(p.clips);
+  const per = new Map();
+  for (const s of merged) {
+    const sel = { start: Math.max(0, s.start), end: Math.min(total, s.end) };
+    if (sel.end - sel.start < 0.1) continue;
+    for (const piece of tm.selectionPieces(p.clips, sel)) {
+      per.set(piece.clipId, [...(per.get(piece.clipId) ?? []), { start: piece.srcStart, end: piece.srcEnd }]);
+    }
+  }
+  if (!per.size) return showToast("Pick at least one shot first", "error");
+  const mains = p.clips.filter((c) => tm.segments([c]).length);
+  updateKeeps((q) => { for (const c of mains) q.clips.find((x) => x.id === c.id).keeps = keepOnly(c.keeps, per.get(c.id) ?? []); });
+  showToast(`Timeline now holds only ${merged.length} shot${merged.length === 1 ? "" : "s"}. Ctrl+Z brings the rest back.`, "info", 4000);
 }

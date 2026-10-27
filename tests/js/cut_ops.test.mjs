@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deleteKeepAt, removeRange, splitKeeps } from "../../web/cut_ops.js";
+import { deleteKeepAt, keepOnly, removeRange, splitKeeps } from "../../web/cut_ops.js";
 
 const K = (start, end, enabled = true) => ({ start, end, enabled });
 
@@ -26,4 +26,13 @@ test("removeRange cuts a range out across keeps, keeping the outer parts", () =>
 test("a removed range stays removed when removed again", () => {
   const once = removeRange([K(0, 10)], 2, 6);
   assert.equal(removeRange(once, 2, 6), null);
+});
+
+test("keepOnly leaves just the wanted ranges enabled and keeps the rest restorable", () => {
+  assert.deepEqual(keepOnly([K(0, 100)], [K(10, 20), K(50, 60)]),
+    [K(0, 10, false), K(10, 20), K(20, 50, false), K(50, 60), K(60, 100, false)]);
+  assert.deepEqual(keepOnly([K(0, 10), K(20, 30), K(40, 50, false)], [K(5, 25)]),
+    [K(0, 5, false), K(5, 10), K(20, 25), K(25, 30, false), K(40, 50, false)]);
+  assert.deepEqual(keepOnly([K(0, 10)], []), [K(0, 10, false)]);          // a clip with no shot drops out
+  assert.deepEqual(keepOnly([K(0, 10)], [K(0, 10)]), [K(0, 10)]);
 });
