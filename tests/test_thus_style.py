@@ -113,3 +113,22 @@ def test_broll_shot_and_text_scene_media(tmp_path):
     assert r.returncode == 0, r.stderr
     d = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(tmp_path / "t.mp4")], capture_output=True, text=True).stdout)
     assert abs(d - 3.5) < 0.1
+
+
+def test_subtitle_chunking_srt_roundtrip_and_time_mapping(tmp_path):
+    pytest.importorskip("pythainlp")
+    import subtitles
+    import build_short
+    cues = subtitles.chunk_segment(10.0, 16.0, "แต่ตอนนี้พวกคุณเก่งก็ยังไม่เก่งความรู้ก็น้อยมากเลยนะครับ")
+    assert len(cues) >= 2 and cues[0][0] == 10.0 and abs(cues[-1][1] - 16.0) < 0.05
+    assert all(len(line) <= subtitles.MAX_LINE_CHARS + 6 for _, _, t in cues for line in t.split("\n"))
+    assert all(len(t.split("\n")) <= 2 for _, _, t in cues)
+    assert subtitles.chunk_segment(0, 1, "อ้า...") == []                      # filler-only segments are dropped
+    f = tmp_path / "a.srt"
+    subtitles.write_srt(cues, f)
+    back = subtitles.parse_srt(f.read_text(encoding="utf-8"))
+    assert [t for _, _, t in back] == [t for _, _, t in cues] and abs(back[0][0] - 10.0) < 0.002
+    # source time -> output time: a shot that starts at source 10 s and sits first in the output
+    out = build_short.map_cues([(9.0, 11.0, "x"), (30.0, 31.0, "gone")], [(10.0, 20.0, 0.0)])
+    assert out == [(0.0, 1.0, "x")]
+    assert "{\\c&H2EB0FF&}10{\\c&HFFFFFF&}" in build_short.subs_ass([(0, 1, "รอ 10 วินาที")])   # numbers are the only accent

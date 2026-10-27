@@ -206,14 +206,48 @@ def measure_loudness(path):
     return json.loads(txt[txt.rfind("{"):txt.rfind("}") + 1])
 
 
+SUB_FS, SUB_MARGIN_V, SUB_PAD = 92, 420, 16        # libass font size (~62 px em), bottom margin clear of TikTok's UI, box padding
+SUB_BOX = "&H26361127"                                # brand purple #271136 at 85% opacity (ASS is BBGGRR, alpha first)
+SUB_ACCENT = "&H2EB0FF&"                              # #FFB02E amber: numbers only (timing inside a segment is estimated, so no per-word karaoke)
+
+
+def map_cues(cues, ranges):
+    """Cues in source time -> output time. ranges = [(src_t0, src_t1, out_start)] per shot; a cue is clipped to each shot it overlaps."""
+    out = []
+    for a, b, text in cues:
+        for s0, s1, o0 in ranges:
+            lo, hi = max(a, s0), min(b, s1)
+            if hi - lo >= 0.15:
+                out.append((o0 + lo - s0, o0 + hi - s0, text))
+    return sorted(out)
+
+
+def subs_ass(cues):
+    import re
+    def t(x):
+        cs = round(x * 100)
+        return "%d:%02d:%02d.%02d" % (cs // 360000, cs // 6000 % 60, cs // 100 % 60, cs % 100)
+    head = ("[Script Info]\nScriptType: v4.00+\nPlayResX: %d\nPlayResY: %d\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\n"
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, "
+            "Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+            "Style: S,%s,%d,&H00FFFFFF,&H00FFFFFF,%s,&H00000000,0,0,0,0,100,100,0,0,3,%d,0,2,60,60,%d,1\n\n"
+            "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n") % (W, H, FONT_FAMILY, SUB_FS, SUB_BOX, SUB_PAD, SUB_MARGIN_V)
+    ev = []
+    for a, b, text in cues:
+        body = re.sub(r"\d[\d.,]*%?", lambda m: "{\\c%s}%s{\\c&HFFFFFF&}" % (SUB_ACCENT, m.group(0)), text.replace("\n", "\\N"))
+        ev.append("Dialogue: 0,%s,%s,S,,0,0,0,,{\\fad(70,50)\\fscx93\\fscy93\\t(0,120,\\fscx100\\fscy100)}%s\n" % (t(a), t(b), body))
+    return head + "".join(ev)
+
+
 def build(edl, out_path, fonts_dir, keep=False):
     work = Path(tempfile.mkdtemp(prefix="thus-short-"))
     try:
         sizes = {k: probe_size(v) for k, v in edl["cams"].items()}
-        parts, video_frames = [], 0
+        parts, video_frames, ranges = [], 0, []
         for i, shot in enumerate(edl["shots"]):
             p, n = render_shot(i, shot, edl, sizes, work)
             parts.append(p)
+            ranges.append((shot['t0'], shot['t1'], video_frames / FPS))
             video_frames += n
             print(f"  shot {i}: {shot['layout']:<5} {shot['t0']}-{shot['t1']}  ({n} frames)")
         endp, _ = render_end_card(edl, work)
@@ -221,17 +255,28 @@ def build(edl, out_path, fonts_dir, keep=False):
         (work / "list.txt").write_text("".join(f"file '{p.name}'\n" for p in parts), encoding="utf-8")
         run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-c", "copy", "joined.mov"], cwd=work)
         info = {}
-        title = edl.get("title")
-        graph = "[0:v]null[v0]"
+        title, subs = edl.get("title"), edl.get("subtitles")
+        T = Title(work, fonts_dir) if (title or subs) else None
+        stages = []
         if title:
-            T = Title(work, fonts_dir)
             info["title"] = T.layout(title["lines"], title.get("seconds", TITLE_SECONDS), title.get("fade", TITLE_FADE), title.get("scrim", 0.0))
-            graph = "[v0]ass=title.ass:fontsdir=fonts:shaping=complex[vt]"
+            stages.append("ass=title.ass:fontsdir=fonts:shaping=complex")
+        if subs:
+            from subtitles import parse_srt, write_srt
+            cues = parse_srt(Path(subs["file"]).read_text(encoding="utf-8"))
+            cues = cues if subs.get("time") == "out" else map_cues(cues, ranges)
+            (work / "subs.ass").write_text(subs_ass(cues), encoding="utf-8")
+            write_srt(cues, Path(out_path).with_suffix(".srt"))
+            info["subtitle_cues"] = len(cues)
+            stages.append("ass=subs.ass:fontsdir=fonts:shaping=complex")
         wm = Path(edl.get("watermark_png") or SKILL / "assets" / "watermark.png")
         tv = video_frames / FPS
         wx, wy = edl.get("watermark_xy", WATERMARK_XY)
-        chain = (f"[0:v][1:v]overlay={wx}:{wy}:enable='lt(t,{tv:.4f})':format=auto[v0];"
-                 + (graph if title else "[v0]null[vt]"))
+        if edl.get("watermark", True):
+            chain = f"[0:v][1:v]overlay={wx}:{wy}:enable='lt(t,{tv:.4f})':format=auto[v0];"
+        else:
+            chain = "[0:v]null[v0];"
+        chain += "[v0]" + (",".join(stages) if stages else "null") + "[vt]"
         loud = measure_loudness(work / "joined.mov")
         af = (f"loudnorm=I={LUFS}:TP=-1.5:LRA=7:measured_I={loud['input_i']}:measured_TP={loud['input_tp']}:measured_LRA={loud['input_lra']}:"
               f"measured_thresh={loud['input_thresh']}:offset={loud['target_offset']}:linear=true,aresample=48000")
