@@ -36,3 +36,8 @@ They were cut from the owner's own clips with `scripts/extract_assets.py ref/ep3
 - Whisper was not available when the style was measured, so subtitle/word timing was not measured; the references have no running subtitles. If the user wants subtitles, that is a new decision, not part of this style.
 - `Prompt Medium` is the closest shipped weight; the reference title looks one step bolder (SemiBold?). `OUTLINE` in `build_short.py` thickens it slightly. Not sure of the exact weight.
 - The close-up zoom relative to the split framing was estimated by eye at about 2-2.5x; check the crop on real footage and adjust `cu_zoom` / `cx`.
+
+## Text-only short (no footage)
+`python .claude/skills/thus-short-style/scripts/text_short.py scenes.json -o out.mp4` turns a scene list (2-3 short lines + seconds each) into a silent
+1080x1920 short with the same title rules (fitted lines, white Prompt Medium, hard cuts). Example: `examples/best_loser_wins_60s.json`
+(60 s from the Best Loser Wins podcast script). No voice is generated; scene lengths are a reading pace, not tied to audio.

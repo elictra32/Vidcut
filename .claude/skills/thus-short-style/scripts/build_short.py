@@ -95,7 +95,8 @@ class Title:
         x0, x1, y0, y1 = b
         return dict(w=x1 - x0 + 1, h=y1 - y0 + 1, dx=(x0 + x1) / 2 - 540, dy=(y0 + y1) / 2 - 960)
 
-    def layout(self, lines, seconds=TITLE_SECONDS, fade=TITLE_FADE):
+    def place(self, lines):
+        """Fit and stack `lines` (see the TITLE_* constants). Returns ([(text, ass tags)], planned ink y ranges, font sizes)."""
         m = [self.measure(t) for t in lines]
         fs = [100 * TITLE_INK_W / x["w"] for x in m]
         for i, x in enumerate(m):                      # lines that would get too tall take a neighbour's size
@@ -112,14 +113,16 @@ class Title:
             cy = top + hs[i] / 2
             x = TITLE_CENTER[0] - m[i]["dx"] * fs[i] / 100
             y = cy - m[i]["dy"] * fs[i] / 100
-            tag = r"\an5\pos(%.1f,%.1f)\fs%.1f" % (x, y, fs[i])
-            if fade:
-                tag += r"\fad(0,%d)" % round(fade * 1000)
-            events.append((t, tag))
+            events.append((t, r"\an5\pos(%.1f,%.1f)\fs%.1f" % (x, y, fs[i])))
             targets.append((top, top + hs[i]))
             top += hs[i] + TITLE_GAP
-        ass = self._ass(events, seconds)
-        (self.work / "title.ass").write_text(ass, encoding="utf-8")
+        return events, targets, fs
+
+    def layout(self, lines, seconds=TITLE_SECONDS, fade=TITLE_FADE):
+        events, targets, fs = self.place(lines)
+        if fade:
+            events = [(t, tag + r"\fad(0,%d)" % round(fade * 1000)) for t, tag in events]
+        (self.work / "title.ass").write_text(self._ass(events, seconds), encoding="utf-8")
         return dict(font_sizes=[round(f, 1) for f in fs], planned_ink_y=[(round(a), round(b)) for a, b in targets])
 
 
