@@ -2,6 +2,7 @@ import { getProject, subscribe, update } from "./state.js";
 import * as tm from "./timeline_math.js";
 import { $, el, fmtTime } from "./util.js";
 import * as player from "./player.js";
+import { cutHere, cutOutSelection, deleteSegment } from "./cut_tools.js";
 
 const DEFAULT_LEN = 90; // seconds: a typical 1-2 minute short
 
@@ -53,6 +54,9 @@ export function initTransport() {
     if (e.code === "Space") (e.preventDefault(), player.toggle());
     else if (e.key === "i") setIn(player.getTime());
     else if (e.key === "o") setOut(player.getTime());
+    else if (e.key === "s") cutHere();
+    else if (e.key === "x") cutOutSelection();
+    else if (e.key === "Delete" || e.key === "Backspace") (e.preventDefault(), deleteSegment());
     else if (e.key === "ArrowLeft") player.seek(Math.max(0, player.getTime() - (e.shiftKey ? 5 : 1)));
     else if (e.key === "ArrowRight") player.seek(player.getTime() + (e.shiftKey ? 5 : 1));
   });

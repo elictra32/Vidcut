@@ -77,7 +77,12 @@ def selection_pieces(clips, sel: Selection) -> list[Piece]:
         seg_end = e + (k.end - k.start)
         lo, hi = max(sel.start, e), min(sel.end, seg_end)
         if hi - lo > EPS:
-            pieces.append(Piece(cid, k.start + (lo - e), k.start + (hi - e), lo - sel.start))
+            piece = Piece(cid, k.start + (lo - e), k.start + (hi - e), lo - sel.start)
+            last = pieces[-1] if pieces else None
+            if last and last.clip_id == cid and abs(last.src_end - piece.src_start) < 1e-6:
+                last.src_end = piece.src_end  # a split with nothing removed: one stretch, not two
+            else:
+                pieces.append(piece)
     return pieces
 
 
@@ -118,4 +123,9 @@ def subtitles_for_export(clips, subs, sel: Selection) -> list[tuple[float, float
 
 def cut_points(clips) -> list[float]:
     """Edited times where one kept stretch ends and the next begins (dead air removed, or a new clip starts)."""
-    return [t for i, (_, _, t) in enumerate(_segments(clips)) if i > 0]
+    out, prev = [], None
+    for cid, k, t in _segments(clips):
+        if prev is not None and not (prev[0] == cid and abs(prev[1] - k.start) < 1e-6):  # a split with nothing removed is no cut
+            out.append(t)
+        prev = (cid, k.end)
+    return out

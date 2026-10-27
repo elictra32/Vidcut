@@ -74,8 +74,11 @@ export function selectionPieces(clips, sel) {
     const lo = Math.max(sel.start, g.editedStart);
     const hi = Math.min(sel.end, g.editedStart + g.len);
     if (hi - lo > EPS) {
-      out.push({ clipId: g.clipId, srcStart: g.keep.start + (lo - g.editedStart),
-                 srcEnd: g.keep.start + (hi - g.editedStart), outStart: lo - sel.start });
+      const piece = { clipId: g.clipId, srcStart: g.keep.start + (lo - g.editedStart),
+                      srcEnd: g.keep.start + (hi - g.editedStart), outStart: lo - sel.start };
+      const last = out[out.length - 1];
+      if (last && last.clipId === piece.clipId && Math.abs(last.srcEnd - piece.srcStart) < 1e-6) last.srcEnd = piece.srcEnd; // split, nothing removed
+      else out.push(piece);
     }
   }
   return out;

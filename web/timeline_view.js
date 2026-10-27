@@ -5,6 +5,8 @@ import * as tm from "./timeline_math.js";
 import * as player from "./player.js";
 import { ensurePeaks, peakMax } from "./waveforms.js";
 import { $, cssVar, el, fitCanvas, rafThrottle } from "./util.js";
+import { cutHere, cutOutSelection, deleteSegment } from "./cut_tools.js";
+import { addClipFromDialog } from "./clips_panel.js";
 
 const RULER_H = 22;
 const WAVE_H = 84;
@@ -92,10 +94,14 @@ const draw = rafThrottle(() => {
     ctx.fillRect(x, mid - half, 1, half * 2);
   }
   // cut points between kept segments
-  ctx.fillStyle = cssVar("--cut");
-  for (const g of segs.slice(1)) {
+  for (let i = 1; i < segs.length; i++) {
+    const g = segs[i], prev = segs[i - 1];
     const x = xAt(g.editedStart, w);
-    if (x >= 0 && x <= w) ctx.fillRect(Math.round(x), RULER_H, 1, WAVE_H);
+    if (x < 0 || x > w) continue;
+    // a split where nothing was removed (made with "Cut here") is drawn in a different colour from a real cut
+    const split = prev.clipId === g.clipId && Math.abs(prev.keep.end - g.keep.start) < 1e-6;
+    ctx.fillStyle = split ? "#f5c542" : cssVar("--cut");
+    ctx.fillRect(Math.round(x), RULER_H, split ? 2 : 1, WAVE_H);
   }
   // selection
   const s = p.selection;
@@ -150,6 +156,10 @@ export function initTimelineView() {
   canvas = el("canvas", { class: "timeline-canvas", height: 150 });
   const bar = el("div", { class: "tl-bar" },
     el("strong", {}, "Timeline (after dead air cut)"),
+    el("button", { id: "btn-add-to-timeline", class: "primary", title: "Add a clip after the last one on the timeline", onclick: addClipFromDialog }, "+ Add clip"),
+    el("button", { id: "btn-cut-here", title: "Split the segment at the playhead (S)", onclick: cutHere }, "✂ Cut here"),
+    el("button", { id: "btn-delete-seg", title: "Delete the segment under the playhead (Delete)", onclick: deleteSegment }, "Delete segment"),
+    el("button", { id: "btn-cut-selection", title: "Cut out everything between In and Out (X)", onclick: cutOutSelection }, "Cut out In–Out"),
     el("span", { class: "spacer" }),
     el("button", { class: "ghost", onclick: () => zoom(0.5, player.getTime()) }, "Zoom in"),
     el("button", { class: "ghost", onclick: () => zoom(2, player.getTime()) }, "Zoom out"),
