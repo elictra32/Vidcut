@@ -21,6 +21,7 @@ let loadedVersion = null;
 let raf = 0;
 let stopAt = null;
 let editedTime = 0;
+let review = false; // playing an intro/outro on its own (to look at a cover), not the edit
 let wantPlay = false; // the user asked for playback; a <video> pauses by itself at the end of a file
 
 export const onTime = (fn) => (timeListeners.add(fn), () => timeListeners.delete(fn));
@@ -79,6 +80,7 @@ async function loadClip(clipId, atSrc = 0) {
 
 /** Jump the playhead to an edited-time position. */
 export async function seek(t) {
+  review = false;
   const p = getProject();
   const hit = p && tm.editedToSource(p.clips, t);
   if (!hit) return;
@@ -89,6 +91,7 @@ export async function seek(t) {
 
 /** Show a clip's first kept moment (or its start when everything is cut) for review. */
 export async function showClip(clipId) {
+  review = false;
   const p = getProject();
   const clip = p.clips.find((c) => c.id === clipId);
   if (!clip) return;
@@ -149,6 +152,14 @@ function swapIfReady(target) {
 async function tick() {
   const p = getProject();
   if (!wantPlay || !p) return;
+  if (review) { // a cover on its own: play it to its end, then stop
+    const c = p.clips.find((x) => x.id === loadedClipId);
+    const last = c && tm.enabledKeeps(c).at(-1);
+    if (video.ended || !last || video.currentTime >= last.end - 0.03) return pause();
+    emit();
+    raf = requestAnimationFrame(tick);
+    return;
+  }
   let swapped = false;
   const b = tm.upcomingBoundary(p.clips, loadedClipId, video.currentTime);
   if (b && (b.target.kind === "seek" || b.target.kind === "clip")) {
@@ -170,7 +181,19 @@ export async function play(until = null) {
   if (!p || !tm.segments(p.clips).length) return;
   stopAt = until;
   const loaded = p.clips.find((c) => c.id === loadedClipId);
-  if (!loaded || (loaded.role ?? "main") !== "main") await seek(editedTime); // an intro/outro is only for review: play the main timeline
+  if (loaded && (loaded.role ?? "main") !== "main") {
+    // an intro/outro the user opened: play just that clip (from its start if it is at the end)
+    const keeps = tm.enabledKeeps(loaded);
+    if (!keeps.length) return;
+    review = true;
+    if (video.currentTime >= keeps.at(-1).end - 0.05) video.currentTime = keeps[0].start;
+    wantPlay = true;
+    await video.play().catch(() => {});
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(tick);
+    return;
+  }
+  if (!loaded) await seek(editedTime);
   if (editedTime >= tm.editedDuration(p.clips) - 0.05) await seek(0);
   wantPlay = true;
   await video.play().catch(() => {});
@@ -181,6 +204,7 @@ export async function play(until = null) {
 
 export function pause() {
   wantPlay = false;
+  review = false;
   for (const v of videos) v.pause();
   cancelAnimationFrame(raf);
   stopAt = null;
@@ -202,6 +226,7 @@ for (const v of videos) {
   // playback loop alone can't see it: 'ended' pauses the <video>, and we must move on to the next clip.
   v.addEventListener("ended", async () => {
     if (v !== video || !wantPlay) return;
+    if (review) return pause();
     if (await advance()) {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(tick);

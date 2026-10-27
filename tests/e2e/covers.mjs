@@ -45,6 +45,16 @@ try {
   const vp = (await (await fetch(`${app.base}/api/project`)).json()).project;
   const vc = vp.clips.filter((c) => c.role !== "main");
   must(vc.map((c) => c.role).join() === "intro,outro" && vc.every((c) => c.width === 1080 && c.height === 1920), "a vertical intro and outro (1080x1920) were made");
+  // a cover can be opened from the clip list and played on its own (it used to jump back to the main video)
+  await page.locator(".clip-list li", { hasText: "Intro for EP 1" }).locator(".clip-main").click();
+  await page.waitForTimeout(600);
+  await page.click("button.primary:has-text(\"Play\")");
+  await page.waitForTimeout(1200);
+  const seen = await page.evaluate(async () => { const pl = await import("/player.js"); return { id: pl.getLoadedClipId(), t: pl.getSourceTime(), playing: pl.isPlaying() }; });
+  const introId = (await (await fetch(`${app.base}/api/project`)).json()).project.clips.find((c) => c.role === "intro").id;
+  must(seen.id === introId && seen.t > 0.5, `Play plays the cover itself (clip ${seen.id}, at ${seen.t.toFixed(1)} s)`);
+  await page.waitForTimeout(2600);
+  must(!(await page.evaluate(async () => (await import("/player.js")).isPlaying())), "it stops at the end of the cover");
   must(problems.length === 0, "no console errors" + (problems.length ? ": " + problems.join(" | ") : ""));
 } catch (e) {
   failed = true;
