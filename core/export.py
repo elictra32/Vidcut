@@ -61,7 +61,7 @@ def _frame_chain(clip: Clip, W: int, H: int, tag: str, n_frames: int) -> list[st
     tail = (f"fps={FPS},tpad=stop=4:stop_mode=clone,trim=end_frame={n_frames},setpts=PTS-STARTPTS,"
             f"setsar=1,format=yuv420p")
     src = f"[r{tag}]"
-    grade = grade_filter(clip.grade, "bt709" if clip.height >= 720 else "bt601")   # colour correction on the source picture, before scaling and framing
+    grade = grade_filter(clip.grade, clip.color_matrix or ("bt709" if clip.height >= 720 else "bt601"), clip.full_range)   # colour correction on the source picture, before scaling and framing
     head = [f"[{tag}:v]setpts=PTS-STARTPTS{',' + grade if grade else ''}[r{tag}]"]
     if abs(clip.width / clip.height - W / H) < 0.01:
         return head + [f"{src}scale={W}:{H},{tail}[v{tag}]"]

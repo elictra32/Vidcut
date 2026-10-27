@@ -1011,3 +1011,9 @@ def test_brand_logo_lookup_ignores_case_and_a_bad_name_says_where_it_looked(clie
     bad = client.post("/api/overlays", json={"brand": "nope.png"})
     err = bad.json()["error"]
     assert bad.status_code == 404 and "logo" in err["hint"] and str(len(files)) in err["hint"]
+
+
+def test_a_clip_added_through_the_server_remembers_its_colour_matrix(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "c.mp4"), [("tone", 2)], size="1280x720"))
+    c = get_project(client)["clips"][0]
+    assert c["color_matrix"] in ("bt709", "bt601") and c["full_range"] is False

@@ -72,3 +72,15 @@ def test_a_barely_there_grade_does_not_shift_colours_through_the_rgb_round_trip(
     clip.grade = Grade(temperature=0.5)
     render_preview_frame(proj, 0.5, tiny)
     assert all(abs(a - b) <= 3 for a, b in zip(mean_rgb(plain), mean_rgb(tiny)))
+
+
+def test_the_colour_matrix_and_range_follow_what_the_file_says():
+    from core.media import color_matrix_of, is_full_range
+    assert color_matrix_of({"color_space": "bt709", "height": 480}) == "bt709"
+    assert color_matrix_of({"color_space": "smpte170m", "height": 1080}) == "bt601"
+    assert color_matrix_of({"color_space": "bt2020nc", "height": 2160}) == "bt2020"
+    assert color_matrix_of({"height": 1080}) == "bt709" and color_matrix_of({"height": 480}) == "bt601"   # untagged: a player guesses by size
+    assert is_full_range({"color_range": "pc"}) and is_full_range({"pix_fmt": "yuvj420p"}) and not is_full_range({"color_range": "tv"})
+    f = grade_filter(Grade(temperature=-20), "bt2020", True)
+    assert "in_color_matrix=bt2020:in_range=pc" in f and "out_range=pc" in f
+

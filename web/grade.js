@@ -17,10 +17,14 @@ export function gradeParams(g) {
  * 4x5 feColorMatrix values. Same order as the export: channel gains, saturation (chroma only, luma kept), then contrast
  * and brightness on the LUMA only around mid grey (ffmpeg eq works on Y and chroma, not on R, G, B separately).
  */
-export function gradeMatrix(g) {
+const LUMA = { bt709: [0.2126, 0.7152, 0.0722], bt601: [0.299, 0.587, 0.114], bt2020: [0.2627, 0.678, 0.0593] };
+/** `clip` (optional) tells which luma weights and range the picture uses; without it HD is assumed. */
+export function gradeMatrix(g, clip = null) {
   const p = gradeParams(g);
+  const m = clip?.color_matrix || ((clip?.height ?? 1080) >= 720 ? "bt709" : "bt601");
   const gain = [p.r, p.g, p.b];
-  const W = [0.2126, 0.7152, 0.0722]; // BT.709 luma, as for HD footage
+  const W = LUMA[m] ?? LUMA.bt709;
+  const bright = clip?.full_range ? 1 : BRIGHT_SCALE;
   const luma = W.map((w, j) => w * gain[j]); // luma after the gains; saturation keeps it
   const rows = [];
   for (let i = 0; i < 3; i++) {
@@ -29,7 +33,7 @@ export function gradeMatrix(g) {
       const sat = (i === j ? p.saturation : 0) + (1 - p.saturation) * W[j];
       row.push(sat * gain[j] + (p.contrast - 1) * luma[j]);
     }
-    rows.push([...row, 0, p.brightness * BRIGHT_SCALE - 0.5 * (p.contrast - 1)]);
+    rows.push([...row, 0, p.brightness * bright - 0.5 * (p.contrast - 1)]);
   }
   rows.push([0, 0, 0, 1, 0]);
   return rows.flat();
@@ -64,6 +68,6 @@ export function applyGrade(video, clip) {
   if (!video) return;
   const g = clip?.grade;
   if (isNeutral(g)) { video.style.filter = ""; return; }
-  filterFor(`grade-${video.id}`).setAttribute("values", gradeMatrix(g).map((v) => +v.toFixed(5)).join(" "));
+  filterFor(`grade-${video.id}`).setAttribute("values", gradeMatrix(g, clip).map((v) => +v.toFixed(5)).join(" "));
   video.style.filter = `url(#grade-${video.id})`;
 }

@@ -24,6 +24,16 @@ try {
   must(/grade-video/.test(await filter()), "the preview video gets the colour filter");
   const m = await page.$eval("#grade-video feColorMatrix", (e) => e.getAttribute("values").split(" ").map(Number));
   must(m[0] < 1 && m[12] > 1, "the filter takes red down and blue up");
+  await page.waitForSelector("#frame.exact", { timeout: 15000 });
+  must(await page.$eval("#exact-frame", (i) => i.complete && i.naturalWidth > 100), "while paused, the preview shows the real rendered frame");
+  must((await page.$eval("#sub-overlay", (e) => getComputedStyle(e).visibility)) === "hidden", "the live overlays step aside (they are in the real frame already)");
+  await page.evaluate(async () => (await import("/player.js")).play());
+  await sleep(500);
+  must(!(await page.$eval("#frame", (f) => f.classList.contains("exact"))), "playing returns to the live preview");
+  await page.evaluate(async () => (await import("/player.js")).pause());
+  await page.click("#exact-preview");
+  must(!(await page.$eval("#frame", (f) => f.classList.contains("exact"))), "the exact preview can be switched off");
+  await page.click("#exact-preview");
   const num = page.locator("#color-panel .numslider input.num").nth(2);   // Brightness
   await num.fill("20"); await num.press("Tab");
   await sleep(900);

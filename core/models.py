@@ -44,6 +44,8 @@ class Clip:
     framing: Framing = field(default_factory=Framing)
     grade: Grade = field(default_factory=Grade)
     role: str = "main"
+    color_matrix: str = ""    # bt709 / bt601 / bt2020 as probed ("" = not probed: guess from the height)
+    full_range: bool = False  # full-range (JPEG-style) YUV instead of the usual limited range
     cuts_confirmed: bool = False  # the user accepted the dead-air cuts; the review strip is tucked away
 
 

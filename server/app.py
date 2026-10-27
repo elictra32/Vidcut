@@ -32,7 +32,7 @@ from core.episodes import clip_video_kbps, plan_episodes
 from core.export import export_duration, manifest_path, render_preview_frame, run_export
 from core.fonts import FONT_FILES
 from core.grade import clamp as clamp_grade
-from core.media import FFmpegError, is_browser_playable, make_proxy, probe
+from core.media import FFmpegError, color_matrix_of, is_browser_playable, is_full_range, make_proxy, probe
 from core.models import ROLES, Clip, Keep, Overlay, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
@@ -239,7 +239,7 @@ def create_app(home: str | None = None) -> FastAPI:
                            "Try opening it in a video player first, or convert the file", e.details) from e
         clip = Clip(id=uuid.uuid4().hex[:8], path=path, duration=info["duration"], width=info["width"],
                     height=info["height"], fps=info["fps"], has_audio=info["has_audio"],
-                    keeps=[Keep(0.0, info["duration"])],
+                    keeps=[Keep(0.0, info["duration"])], color_matrix=color_matrix_of(info), full_range=is_full_range(info),
                     cuts_confirmed=True)  # nothing to review until dead air is detected: an already-edited file goes straight on
         with st.lock:
             st.project.clips.append(clip)

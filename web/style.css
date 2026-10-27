@@ -196,3 +196,8 @@ button.danger { color: #ff8a8a; }
 .vertical-only[hidden], label.field[hidden] { display: none; }
 
 #btn-export-highlights { margin-top: 4px; }
+
+#exact-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: none; z-index: 1; }
+#frame.exact #exact-frame { display: block; }
+#frame.exact.stale #exact-frame { opacity: 0.55; }
+#frame.exact #sub-overlay, #frame.exact #ov-layer { visibility: hidden; }

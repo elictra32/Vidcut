@@ -59,6 +59,7 @@ def probe(path: str) -> dict:
         "has_audio": a is not None,
         "vcodec": v.get("codec_name"), "acodec": a.get("codec_name") if a else None,
         "container": data.get("format", {}).get("format_name", ""),
+        "color_space": v.get("color_space"), "color_range": v.get("color_range"), "pix_fmt": v.get("pix_fmt"),
     }
 
 
@@ -67,6 +68,22 @@ def _rotation(stream: dict) -> int:
         if "rotation" in sd:
             return int(float(sd["rotation"]))
     return int(stream.get("tags", {}).get("rotate", 0) or 0)
+
+
+def color_matrix_of(info: dict) -> str:
+    """The YUV<->RGB matrix a player uses for this picture: what the file says, else bt709 for HD and bt601 for SD."""
+    cs = (info.get("color_space") or "").lower()
+    if cs == "bt709":
+        return "bt709"
+    if cs in ("smpte170m", "bt470bg", "bt470m", "fcc"):
+        return "bt601"
+    if cs.startswith("bt2020"):
+        return "bt2020"
+    return "bt709" if (info.get("height") or 0) >= 720 else "bt601"
+
+
+def is_full_range(info: dict) -> bool:
+    return info.get("color_range") == "pc" or str(info.get("pix_fmt") or "").startswith("yuvj")
 
 
 def is_browser_playable(info: dict) -> bool:

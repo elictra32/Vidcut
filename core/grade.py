@@ -25,18 +25,19 @@ def _n(x: float) -> str:
     return f"{x:.4f}".rstrip("0").rstrip(".") or "0"
 
 
-def grade_filter(g: Grade, matrix: str = "bt709") -> str:
+def grade_filter(g: Grade, matrix: str = "bt709", full_range: bool = False) -> str:
     """ffmpeg filter text for the grade, '' when it changes nothing. `matrix` is the YUV<->RGB conversion the picture was
     made with (bt709 for HD, bt601 for SD: what a player assumes for an untagged file). Warmth/tint work in RGB, so the
     picture is converted with exactly that matrix and back; letting ffmpeg pick would shift every colour a little."""
     if is_neutral(g):
         return ""
     p = grade_params(g)
+    rng = "pc" if full_range else "tv"
     parts = []
     if any(abs(p[k] - 1) > 1e-9 for k in ("r", "g", "b")):
-        parts.append(f"scale=in_color_matrix={matrix}:in_range=tv,format=gbrp,"
+        parts.append(f"scale=in_color_matrix={matrix}:in_range={rng},format=gbrp,"
                      f"colorchannelmixer=rr={_n(p['r'])}:gg={_n(p['g'])}:bb={_n(p['b'])},"
-                     f"scale=out_color_matrix={matrix}:out_range=tv,format=yuv420p")
+                     f"scale=out_color_matrix={matrix}:out_range={rng},format=yuv420p")
     if abs(p["brightness"]) > 1e-9 or abs(p["contrast"] - 1) > 1e-9 or abs(p["saturation"] - 1) > 1e-9:
         parts.append(f"eq=brightness={_n(p['brightness'])}:contrast={_n(p['contrast'])}:saturation={_n(p['saturation'])}")
     return ",".join(parts)
