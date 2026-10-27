@@ -1,0 +1,85 @@
+{
+ "source": "ep3 (57.45s) + ep4 (99.46s), THUS short-form podcast clips; ranges cover both clips with a small margin",
+ "targets": {
+  "width": [
+   1080,
+   1080
+  ],
+  "height": [
+   1920,
+   1920
+  ],
+  "fps": [
+   25,
+   25
+  ],
+  "sample_rate": [
+   48000,
+   48000
+  ],
+  "audio_kbps": [
+   180,
+   260
+  ],
+  "soft_cuts": [
+   0,
+   0
+  ],
+  "title.start_s": [
+   0,
+   0.04
+  ],
+  "title.ink_width_px": [
+   815,
+   860
+  ],
+  "title.center.0": [
+   522,
+   545
+  ],
+  "title.center.1": [
+   928,
+   945
+  ],
+  "watermark.width_px": [
+   203,
+   211
+  ],
+  "watermark.right_margin_px": [
+   52,
+   58
+  ],
+  "watermark.top_margin_px": [
+   88,
+   95
+  ],
+  "end_card.duration_s": [
+   2.7,
+   3.5
+  ],
+  "audio.lufs": [
+   -17.5,
+   -14.5
+  ],
+  "audio.longest_pause_s": [
+   0,
+   0.9
+  ],
+  "audio.end_card_max_volume_db": [
+   -120,
+   -80
+  ],
+  "title.full_until_s": [
+   3.9,
+   4.3
+  ],
+  "title.gone_s": [
+   4.8,
+   5.3
+  ],
+  "audio.true_peak_dbfs": [
+   -120,
+   0.0
+  ]
+ }
+}

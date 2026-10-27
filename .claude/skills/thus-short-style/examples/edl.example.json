@@ -1,0 +1,14 @@
+{
+  "cams": {"top": "cam_woman.mp4", "bottom": "cam_man.mp4"},
+  "audio": "bottom",
+  "title": {"lines": ["วันที่ตลาด", "ตบหน้า"]},
+  "split_zoom": 1.0,
+  "cu_zoom": 1.0,
+  "shots": [
+    {"layout": "split", "t0": 0.0,   "t1": 15.52},
+    {"layout": "cu", "cam": "bottom", "t0": 15.52, "t1": 20.32, "cx": 0.5},
+    {"layout": "cu", "cam": "top",    "t0": 20.32, "t1": 22.8,  "cx": 0.5},
+    {"layout": "cu", "cam": "bottom", "t0": 22.8,  "t1": 30.28},
+    {"layout": "split", "t0": 30.28, "t1": 33.0}
+  ]
+}

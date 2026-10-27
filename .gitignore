@@ -3,5 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 *.egg-info/
-.claude/skills/
+.claude/skills/*
+!.claude/skills/thus-short-style/
 third_party/
+ref/
