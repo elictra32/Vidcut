@@ -96,6 +96,18 @@ export function initCovers() {
   const imgBack = el("img", { id: "cover-preview-back", class: "cover-preview-img", alt: "Back cover preview", hidden: true });
   const previewNote = el("p", { class: "muted small", id: "cover-preview-note" });
   const previewBox = el("div", { class: "cover-preview" }, el("div", { class: "row" }, imgFront, imgBack), previewNote);
+  // clicking a preview opens it large (click anywhere or press Esc to close)
+  for (const img of [imgFront, imgBack]) {
+    img.title = "Click to see it larger";
+    img.addEventListener("click", () => {
+      const big = el("img", { class: "cover-big", src: img.src, alt: img.alt });
+      const dlg = el("dialog", { class: "frame-dialog cover-dialog" }, big, el("p", { class: "muted small" }, "Click anywhere, or press Esc, to close"));
+      dlg.addEventListener("click", () => dlg.close());
+      dlg.addEventListener("close", () => dlg.remove());
+      document.body.append(dlg);
+      dlg.showModal();
+    });
+  }
   let previewTimer = null, previewSeq = 0;
   const fetchPng = async (body) => {
     const res = await fetch("/api/covers/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

@@ -48,6 +48,12 @@ try {
   await page.selectOption("#cover-title-font", "Kanit Medium");
   await page.waitForFunction((a) => document.querySelector("#cover-preview-front").src !== a, src1, { timeout: 20000 });
   must(true, "choosing another font redraws the preview");
+  await page.click("#cover-preview-front");
+  await page.waitForSelector("dialog.cover-dialog img.cover-big", { timeout: 5000 });
+  must(await page.$eval("dialog.cover-dialog img.cover-big", (i) => i.naturalWidth > 500 && i.getBoundingClientRect().height > 400), "clicking the preview opens it large");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("dialog.cover-dialog", { state: "detached", timeout: 5000 });
+  must(true, "Esc closes the large preview");
   await page.fill("#cover-titles", "Vertical One");
   await page.click("#btn-make-covers");
   await page.waitForSelector(".toast:has-text('Made 1 cover')", { timeout: 120000 });

@@ -207,3 +207,7 @@ button.danger { color: #ff8a8a; }
 .cover-preview-img { width: calc(50% - 4px); border-radius: 6px; border: 1px solid var(--border); }
 .cover-preview-img[hidden] { display: none; }
 .cover-preview .row { flex-wrap: nowrap; align-items: flex-start; }
+
+.cover-preview-img { cursor: zoom-in; }
+.cover-dialog { max-width: 96vw; max-height: 96vh; text-align: center; }
+.cover-big { max-height: 86vh; max-width: 90vw; display: block; margin: 0 auto; border-radius: 6px; }
