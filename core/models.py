@@ -46,6 +46,7 @@ class Subtitle:
     text: str
     x: float | None = None
     y: float | None = None
+    scale: float | None = None  # size multiplier for this line only (None = the style size)
 
 
 @dataclass

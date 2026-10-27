@@ -85,6 +85,35 @@ function addBlank() {
   setSelectedSub(id);
 }
 
+// Characters you actually see: Thai vowel/tone marks that sit on a letter are not counted, nor is whitespace.
+export const charCount = (text) => [...text].filter((ch) => !/[\s\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/.test(ch)).length;
+
+function splitAt(id, pos) {
+  const p = getProject();
+  const s = p.subtitles.find((x) => x.id === id);
+  const head = s.text.slice(0, pos).trim(), tail = s.text.slice(pos).trim();
+  if (!head || !tail) return showToast("Put the cursor inside the text where the line should break", "error");
+  const frac = charCount(head) / Math.max(1, charCount(head) + charCount(tail));
+  const mid = s.src_start + (s.src_end - s.src_start) * frac;
+  const newId = crypto.randomUUID().replaceAll("-", "");
+  update((q) => {
+    const a = q.subtitles.find((x) => x.id === id);
+    const b = { ...a, id: newId, src_start: mid, text: tail };
+    a.src_end = mid;
+    a.text = head;
+    q.subtitles.push(b);
+  }, "subs");
+}
+
+function mergeWithNext(id, nextId) {
+  update((q) => {
+    const a = q.subtitles.find((x) => x.id === id), b = q.subtitles.find((x) => x.id === nextId);
+    a.text = `${a.text} ${b.text}`.trim();
+    a.src_end = Math.max(a.src_end, b.src_end);
+    q.subtitles = q.subtitles.filter((x) => x.id !== nextId);
+  }, "subs");
+}
+
 function deleteAll() {
   const n = getProject().subtitles.length;
   if (!n) return showToast("There are no subtitles to delete", "error");
@@ -124,17 +153,33 @@ export function initSubtitles() {
     if (!p) return; // not loaded yet
     const rows = p.subtitles.map((s) => ({ s, span: spanOf(s) }))
       .sort((a, b) => (a.span ? a.span[0] : 1e9 + a.s.src_start) - (b.span ? b.span[0] : 1e9 + b.s.src_start));
-    list.replaceChildren(...(rows.length ? rows.map(({ s, span }) => {
+    list.replaceChildren(...(rows.length ? rows.map(({ s, span }, i) => {
       const ta = el("textarea", { rows: 2, "aria-label": "Subtitle text" });
       ta.value = s.text;
-      ta.addEventListener("input", () => update((q) => (q.subtitles.find((x) => x.id === s.id).text = ta.value), "subs-text"));
+      const count = el("span", { class: "muted small chars" }, `${charCount(s.text)} chars`);
+      const next = rows[i + 1]?.s.clip_id === s.clip_id ? rows[i + 1].s : null;
+      const size = el("input", { type: "range", min: 40, max: 300, step: 5, value: Math.round((s.scale ?? 1) * 100), class: "sub-size",
+        "aria-label": "Size of this line", title: "Size of this line only (double-click to reset)" });
+      const sizeLabel = el("span", { class: "muted small" }, `${size.value}%`);
+      size.addEventListener("input", () => {
+        sizeLabel.textContent = `${size.value}%`;
+        update((q) => (q.subtitles.find((x) => x.id === s.id).scale = +size.value === 100 ? null : +size.value / 100), "subs-pos");
+      });
+      size.addEventListener("dblclick", () => { size.value = 100; size.dispatchEvent(new Event("input")); });
+      ta.addEventListener("input", () => {
+        count.textContent = `${charCount(ta.value)} chars`;
+        update((q) => (q.subtitles.find((x) => x.id === s.id).text = ta.value), "subs-text");
+      });
       ta.addEventListener("focus", () => ui.selectedSubId !== s.id && setSelectedSub(s.id));
       return el("div", { class: `sub-row${s.id === ui.selectedSubId ? " selected" : ""}${span ? "" : " hidden-sub"}`, "data-id": s.id },
         el("button", { class: "ghost time", title: "Go to this subtitle", onclick: () => { setSelectedSub(s.id); span && player.seek(span[0]); } },
           span ? fmtTime(span[0]) : "hidden"),
         ta,
         el("button", { class: "ghost icon", title: "Delete this subtitle", onclick: () => update((q) => (q.subtitles = q.subtitles.filter((x) => x.id !== s.id)), "subs") }, "✕"),
-        span ? "" : el("span", { class: "muted small" }, "Inside a cut section, so it won't be exported"));
+        span ? "" : el("span", { class: "muted small" }, "Inside a cut section, so it won't be exported"),
+        el("div", { class: "sub-tools" }, count, size, sizeLabel,
+          el("button", { class: "ghost small", title: "Break this line at the text cursor", onclick: () => splitAt(s.id, ta.selectionStart) }, "Split"),
+          next ? el("button", { class: "ghost small", title: "Join with the next line", onclick: () => mergeWithNext(s.id, next.id) }, "Merge ↓") : ""));
     }) : [el("p", { class: "muted small" }, "No subtitles yet. Set In/Out, then click “Generate subtitles”")]));
   };
   subscribe((why) => {

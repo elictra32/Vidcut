@@ -50,3 +50,11 @@ def test_presets_pinned_values():
     assert t.style_overrides == {"size": 72, "default_y": 0.70}
     assert y.style_overrides == {"size": 48, "default_y": 0.88}
     assert set(t.safe_zone) == {"top", "bottom", "left", "right"}
+
+
+def test_to_ass_per_line_scale_only_when_set():
+    out = to_ass([RenderedSub(0, 1, "a", None, None, 1.5), RenderedSub(1, 2, "b", None, None, None),
+                  RenderedSub(2, 3, "c", None, None, 1.0)], SubtitleStyle(), (1080, 1920))
+    lines = [l for l in out.splitlines() if l.startswith("Dialogue")]
+    assert "\\fscx150\\fscy150" in lines[0]
+    assert "\\fsc" not in lines[1] and "\\fsc" not in lines[2]

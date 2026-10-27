@@ -57,6 +57,22 @@ try {
   await page.waitForTimeout(600);
   must((await ta.inputValue()) === EDITED, "edited subtitle text is shown in the list");
 
+  // per-line tools: character count, size, split and merge
+  must(/^\d+ chars$/.test(await page.locator(".sub-row .chars").first().textContent()), "each line shows its character count");
+  const before = (await page.$$(".sub-row")).length;
+  await page.locator(".sub-row textarea").first().evaluate((t) => t.setSelectionRange(3, 3));
+  await page.locator(".sub-row >> text=Split").first().click();
+  await page.waitForFunction((n) => document.querySelectorAll(".sub-row").length === n + 1, before, { timeout: 5000 });
+  must(true, "Split breaks a line in two");
+  await page.locator(".sub-row >> text=Merge").first().click();
+  await page.waitForFunction((n) => document.querySelectorAll(".sub-row").length === n, before, { timeout: 5000 });
+  must(true, "Merge joins a line with the next one");
+  const sizeInput = page.locator(".sub-row .sub-size").first();
+  await sizeInput.evaluate((i) => { i.value = 200; i.dispatchEvent(new Event("input")); });
+  await page.waitForTimeout(700);
+  must(await page.evaluate(async () => (await (await fetch("/api/project")).json()).project.subtitles.some((x) => x.scale === 2)), "per-line size is saved");
+  await page.locator(".sub-row textarea").first().fill(EDITED);
+
   await page.click("text=Export video");
   await page.waitForSelector(".export-result a", { timeout: 120000 });
   const exports = join(app.home, "exports");

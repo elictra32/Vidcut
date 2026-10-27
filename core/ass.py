@@ -14,6 +14,7 @@ class RenderedSub:
     text: str
     x: float | None
     y: float | None
+    scale: float | None = None
 
 
 def _ass_color(hex_color: str, alpha: int = 0) -> str:
@@ -62,8 +63,9 @@ def to_ass(subs: list[RenderedSub], style: SubtitleStyle, play_res: tuple[int, i
     for s in subs:
         x = round((s.x if s.x is not None else style.default_x) * w)
         y = round((s.y if s.y is not None else style.default_y) * h)
+        zoom = f"\\fscx{round(s.scale * 100)}\\fscy{round(s.scale * 100)}" if s.scale and abs(s.scale - 1) > 0.005 else ""
         lines.append(f"Dialogue: 0,{_ass_time(s.start)},{_ass_time(s.end)},Default,,0,0,0,,"
-                     f"{{\\an5\\pos({x},{y})}}{_escape(s.text)}")
+                     f"{{\\an5\\pos({x},{y}){zoom}}}{_escape(s.text)}")
     return "\n".join(lines) + "\n"
 
 

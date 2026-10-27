@@ -31,7 +31,7 @@ export function initStylePanel() {
     const bg = el("input", { type: "color" });
     bg.addEventListener("input", () => bgOn.checked && set("bg_color", bg.value));
     refs.bg_color = { input: bg };
-    const reset = el("button", { class: "ghost", onclick: () => update((p) => p.subtitles.forEach((s) => (s.x = s.y = null)), "subs-pos") },
+    const reset = el("button", { class: "ghost", onclick: () => update((p) => p.subtitles.forEach((s) => (s.x = s.y = s.scale = null)), "subs-pos") },
       "Reset all subtitle positions");
     root.replaceChildren(
       el("h2", {}, "Subtitle style"),

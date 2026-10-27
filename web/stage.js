@@ -51,7 +51,7 @@ function style(node, sub, st, scale) {
   Object.assign(node.style, {
     left: `${(sub.x ?? st.default_x) * 100}%`,
     top: `${(sub.y ?? st.default_y) * 100}%`,
-    fontSize: `${st.size * scale}px`,
+    fontSize: `${st.size * scale * (sub.scale ?? 1)}px`,
     fontFamily: `"${st.font}", "Leelawadee UI", sans-serif`,
     color: st.color,
     webkitTextStroke: box || !st.outline_width ? "0" : `${st.outline_width * 2 * scale}px ${st.outline_color}`,
@@ -84,7 +84,16 @@ function render() {
       node.addEventListener("dblclick", () => update((q) => {
         const s = q.subtitles.find((x) => x.id === sub.id);
         s.x = s.y = null;
+        s.scale = null;
       }, "subs-pos"));
+      node.addEventListener("wheel", (e) => {
+        e.preventDefault(); // wheel over a subtitle resizes just that line
+        const f = Math.exp(-e.deltaY * 0.001);
+        update((q) => {
+          const s = q.subtitles.find((x) => x.id === sub.id);
+          s.scale = +Math.min(3, Math.max(0.4, (s.scale ?? 1) * f)).toFixed(3);
+        }, "subs-pos");
+      }, { passive: false });
       overlay.append(node);
       nodes.set(sub.id, node);
     }

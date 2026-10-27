@@ -163,7 +163,7 @@ def _prepare(project: Project, selection: Selection, with_extras: bool = True):
         raise ExportError("selection_invalid",
                           "The selection is invalid, or no enabled sections are left. "
                           "Please set start/end again and re-enable at least one cut section") from None
-    rendered = [RenderedSub(a + intro_dur, b + intro_dur, s.text, s.x, s.y)
+    rendered = [RenderedSub(a + intro_dur, b + intro_dur, s.text, s.x, s.y, s.scale)
                 for a, b, s in subtitles_for_export(project.clips, project.subtitles, selection)]
     return preset, pieces, rendered
 
