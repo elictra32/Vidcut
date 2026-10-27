@@ -48,3 +48,8 @@ They were cut from the owner's own clips with `scripts/extract_assets.py ref/ep3
 - `scripts/cue_to_edl.py cue-sheet.md --as shots` turns a Media Finder cue sheet into broll shots; `--as scenes` into text_short scenes with `media` backgrounds.
   `--skip-gif` when the video may become a paid ad (Tenor GIFs are organic-only). Find the media itself with the `media-finder` skill on the user's machine
   (this cloud sandbox cannot reach Pexels/Tenor/Iconify).
+
+## Cover + end card only (clip already edited, subtitles already burned in)
+`python .claude/skills/thus-short-style/scripts/add_cover_end.py "clip.mp4" --cover "cover.png" -o "clip_final.mp4"`
+shows the cover image full-frame for 3.1 s (silent), then the clip untouched from 0 s, then the 3.1 s end card; loudness to -16 LUFS; no title, no extra logo, no new subtitles.
+In an edl, a silent cover is `{"layout":"broll","file":"cover.png","t0":0,"t1":3.1,"silent":true}` and `"t1":"end"` means the whole file.

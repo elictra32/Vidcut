@@ -181,8 +181,13 @@ def render_shot(i, shot, edl, sizes, work):
         key = shot["cam"]
         a = add(cams[key], seek=t0)
         graph = [f"[{a}:v]{crop_expr(*sizes[key], W / H, shot.get('zoom', edl.get('cu_zoom', 1.0)), shot.get('cx', 0.5))},scale={W}:{H},setsar=1[v]"]
-    aud = edl.get("audio", "bottom")
-    ai = add(cams.get(aud, aud), seek=t0)
+    if shot.get("silent"):                      # e.g. a cover image: its own silence, the main audio does not advance
+        ins.extend(["-f", "lavfi", "-t", f"{dur + 0.5:.3f}", "-i", "anullsrc=r=48000:cl=stereo"])
+        count[0] += 1
+        ai = count[0] - 1
+    else:
+        aud = edl.get("audio", "bottom")
+        ai = add(cams.get(aud, aud), seek=t0)
     graph.append(f"[{ai}:a]aresample=48000,apad=whole_dur={dur:.4f},atrim=0:{dur:.4f},aformat=channel_layouts=stereo[a]")
     cmd = ["ffmpeg", "-v", "error", "-y", *ins, "-filter_complex", ";".join(graph), "-map", "[v]", "-map", "[a]", "-r", str(FPS),
            "-frames:v", str(n), "-c:v", "libx264", "-crf", "12", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-ar", "48000", str(out)]
@@ -247,7 +252,8 @@ def build(edl, out_path, fonts_dir, keep=False):
         for i, shot in enumerate(edl["shots"]):
             p, n = render_shot(i, shot, edl, sizes, work)
             parts.append(p)
-            ranges.append((shot['t0'], shot['t1'], video_frames / FPS))
+            if not shot.get("silent"):
+                ranges.append((shot['t0'], shot['t1'], video_frames / FPS))
             video_frames += n
             print(f"  shot {i}: {shot['layout']:<5} {shot['t0']}-{shot['t1']}  ({n} frames)")
         endp, _ = render_end_card(edl, work)
@@ -316,6 +322,9 @@ def main():
             s["file"] = str(f if f.is_absolute() else base / f)
             if not Path(s["file"]).is_file():
                 sys.exit(f"b-roll file not found: {s['file']}")
+        if s["t1"] == "end":
+            s["t1"] = round(float(run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                       str(Path(s.get("file") or edl["cams"][s.get("cam", "bottom")]))]).stdout) - 0.0, 3)
         if s["t1"] <= s["t0"]:
             sys.exit(f"shot ends before it starts: {s}")
     fonts = a.fonts or next((str(p / "fonts") for p in SKILL.parents if (p / "fonts" / FONT_FILE).exists()), None)

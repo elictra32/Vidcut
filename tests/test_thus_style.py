@@ -132,3 +132,23 @@ def test_subtitle_chunking_srt_roundtrip_and_time_mapping(tmp_path):
     out = build_short.map_cues([(9.0, 11.0, "x"), (30.0, 31.0, "gone")], [(10.0, 20.0, 0.0)])
     assert out == [(0.0, 1.0, "x")]
     assert "{\\c&H2EB0FF&}10{\\c&HFFFFFF&}" in build_short.subs_ass([(0, 1, "รอ 10 วินาที")])   # numbers are the only accent
+
+
+def test_add_cover_end_keeps_audio_in_sync_and_cover_is_silent(tmp_path):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=25:d=4", "-f", "lavfi", "-i", "sine=f=440:r=48000:d=4",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(tmp_path / "clip.mp4")], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=green:s=1080x1920", "-frames:v", "1", str(tmp_path / "cover.png")], check=True)
+    r = subprocess.run([sys.executable, str(SKILL / "scripts" / "add_cover_end.py"), str(tmp_path / "clip.mp4"), "--cover", str(tmp_path / "cover.png"),
+                        "-o", str(tmp_path / "out.mp4")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    d = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(tmp_path / "out.mp4")], capture_output=True, text=True).stdout)
+    assert abs(d - (3.1 + 4.0 + 3.1)) < 0.1                                   # cover + clip + end card
+    def level(ss, t):
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-ss", str(ss), "-t", str(t), "-i", str(tmp_path / "out.mp4"), "-af", "volumedetect", "-f", "null", "-"],
+                             capture_output=True, text=True).stderr
+        return float(out.split("max_volume:")[1].split("dB")[0])
+    assert level(0.2, 2.5) < -80                                              # cover: silence
+    assert level(3.5, 3.0) > -30                                              # the clip's own sound starts after the cover
+    g = subprocess.run(["ffmpeg", "-v", "error", "-ss", "1", "-i", str(tmp_path / "out.mp4"), "-frames:v", "1", "-vf", "scale=4:4,format=rgb24", "-f", "rawvideo", "-"],
+                       capture_output=True).stdout
+    assert g[1] > 100 and g[0] < 60                                           # the cover is the green frame
