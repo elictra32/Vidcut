@@ -22,6 +22,7 @@ MAX_LINE_CHARS = 20        # Thai characters per line at the house subtitle size
 MAX_CUE_CHARS = 40         # two lines
 CHARS_PER_SECOND = 13.0    # reading/speech pace used to spread a segment's text over its time
 MIN_CUE_S = 0.7
+MAX_SEGMENT_S = 6          # Whisper drops the tail of long Thai segments (checked on 10 s ones), so VAD splits speech at 6 s
 FILLER = re.compile(r"^[\s.…,อ้าเอ่อออืมหือฮะค่ะครับนะ]*$")
 
 
@@ -109,7 +110,7 @@ def transcribe(clip, model_dir, vad_model, start=0.0, threads=4, language="th"):
     vc = sherpa_onnx.VadModelConfig()
     vc.silero_vad.model = str(vad_model)
     vc.silero_vad.min_silence_duration = 0.3
-    vc.silero_vad.max_speech_duration = 25
+    vc.silero_vad.max_speech_duration = MAX_SEGMENT_S
     vc.sample_rate = 16000
     vad = sherpa_onnx.VoiceActivityDetector(vc, buffer_size_in_seconds=60)
     win = vc.silero_vad.window_size
