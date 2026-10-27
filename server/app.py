@@ -25,7 +25,7 @@ from core.encode import AUDIO_KBPS, _normalized, estimate_bytes, source_video_kb
 from core.export import export_duration, render_preview_frame, run_export
 from core.fonts import FONT_FILES
 from core.media import FFmpegError, is_browser_playable, make_proxy, probe
-from core.models import ROLES, Clip, Keep, Project, Selection, project_from_dict, project_to_dict
+from core.models import ROLES, Clip, Keep, Overlay, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
 from core.srt import parse_srt
@@ -65,8 +65,8 @@ class State:
         raise AppError("clip_not_found", "Clip not found in the project", status=404)
 
 
-def _pick_file() -> str | None:
-    override = os.environ.get("VIDCUT_PICK_OVERRIDE")
+def _pick_file(images: bool = False) -> str | None:
+    override = os.environ.get("VIDCUT_PICK_IMAGE_OVERRIDE" if images else "VIDCUT_PICK_OVERRIDE")
     if override:
         return override
     try:
@@ -80,8 +80,9 @@ def _pick_file() -> str | None:
     root.attributes("-topmost", True)
     try:
         return filedialog.askopenfilename(
-            title="Choose video",
-            filetypes=[("Video", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v"), ("All files", "*.*")]) or None
+            title="Choose an image" if images else "Choose video",
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.webp *.bmp"), ("All files", "*.*")] if images
+            else [("Video", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v"), ("All files", "*.*")]) or None
     finally:
         root.destroy()
 
@@ -162,6 +163,16 @@ def create_app(home: str | None = None) -> FastAPI:
                     known.cuts_confirmed = bool(c.cuts_confirmed)
                     clips.append(known)
             proj.clips = clips
+            known_ov = {o.id: o for o in st.project.overlays}
+            overlays = []
+            for o in proj.overlays:  # the page owns placement; the image file itself is the server's
+                k = known_ov.get(o.id)
+                if k is not None:
+                    k.x, k.y = min(1.0, max(0.0, o.x)), min(1.0, max(0.0, o.y))
+                    k.width, k.opacity = min(1.0, max(0.02, o.width)), min(1.0, max(0.0, o.opacity))
+                    k.start, k.end = o.start, o.end
+                    overlays.append(k)
+            proj.overlays = overlays
             proj.export.out_dir = st.project.export.out_dir  # where files get written is chosen via /api/export-folder
             proj.subtitles = [s for s in proj.subtitles if s.clip_id in current]
             st.project = proj
@@ -243,6 +254,55 @@ def create_app(home: str | None = None) -> FastAPI:
         if not os.path.isfile(path):
             raise AppError("file_missing", "Original file not found", "Check that the file is still in its original location", status=404)
         return FileResponse(path, media_type=mimetypes.guess_type(path)[0] or "video/mp4")
+
+    # ---- logo / photo overlays -------------------------------------------------------------
+    IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+
+    def add_overlay(path: str) -> dict:
+        path = os.path.abspath(path)
+        if not os.path.isfile(path):
+            raise AppError("file_missing", "File not found", "Check that the file is still in its original location", path, status=404)
+        if not path.lower().endswith(IMAGE_EXT):
+            raise AppError("not_an_image", "This isn't a supported image", "Use a PNG, JPG, WebP or BMP file", status=400)
+        try:
+            info = probe(path)
+        except FFmpegError as e:
+            raise AppError("unreadable_media", "This image is damaged or unreadable",
+                           "Try opening it in an image viewer first", e.details) from e
+        overlay = Overlay(id=uuid.uuid4().hex[:8], path=path)
+        with st.lock:
+            st.project.overlays.append(overlay)
+            st.project.rev += 1
+            st.save()
+        return {"overlay": asdict(overlay), "width": info["width"], "height": info["height"]}
+
+    @app.post("/api/overlays")
+    def post_overlay(body: dict):
+        return add_overlay(str(body.get("path", "")))
+
+    @app.post("/api/overlays/pick")
+    def pick_overlay():
+        path = _pick_file(images=True)
+        return add_overlay(path) if path else {"overlay": None}
+
+    @app.delete("/api/overlays/{overlay_id}")
+    def delete_overlay(overlay_id: str):
+        with st.lock:
+            before = len(st.project.overlays)
+            st.project.overlays = [o for o in st.project.overlays if o.id != overlay_id]
+            if len(st.project.overlays) == before:
+                raise AppError("overlay_not_found", "Overlay not found", status=404)
+            st.project.rev += 1
+            st.save()
+        return {"ok": True}
+
+    @app.get("/overlay-media/{overlay_id}")
+    def get_overlay_media(overlay_id: str):
+        with st.lock:
+            o = next((x for x in st.project.overlays if x.id == overlay_id), None)
+        if o is None or not os.path.isfile(o.path):
+            raise AppError("file_missing", "Image not found", status=404)
+        return FileResponse(o.path, media_type=mimetypes.guess_type(o.path)[0] or "image/png")
 
     # ---- subtitles from an SRT file (e.g. YouTube auto captions) -----------------------------
     @app.post("/api/subtitles/import-srt")

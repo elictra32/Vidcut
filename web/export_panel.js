@@ -169,5 +169,5 @@ export function initExportPanel() {
     }
   };
   // "framing-x" fires while dragging the slider; re-rendering then would drop the slider mid-drag
-  subscribe((why) => why !== "framing-x" && why !== "subs-text" && why !== "subs-pos" && why !== "subs" && why !== "select" && render());
+  subscribe((why) => !why.startsWith("ov-") && why !== "framing-x" && why !== "subs-text" && why !== "subs-pos" && why !== "subs" && why !== "select" && render());
 }

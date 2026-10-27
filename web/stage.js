@@ -133,7 +133,7 @@ function startDrag(e, id) {
 }
 
 function startCrop(e) {
-  if (e.target.closest(".sub")) return;
+  if (e.target.closest(".sub, .ov")) return;
   const p = getProject();
   const clip = p?.clips.find((c) => c.id === (player.getLoadedClipId() ?? ui.currentClipId));
   const overflow = cropOverflow(clip, preset());

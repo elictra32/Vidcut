@@ -186,7 +186,7 @@ export function initSubtitles() {
     if (why === "select") {
       // only restyle: rebuilding the list here would destroy the textarea that was just focused
       list.querySelectorAll(".sub-row").forEach((r) => r.classList.toggle("selected", r.dataset.id === ui.selectedSubId));
-    } else if (why !== "subs-text" && why !== "subs-pos") render();
+    } else if (why !== "subs-text" && why !== "subs-pos" && !why.startsWith("ov-")) render();
   });
   render();
   setSubtitleLane(paintLane, laneHandler);

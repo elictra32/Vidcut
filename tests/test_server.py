@@ -581,3 +581,40 @@ def test_cuts_confirmed_is_client_owned_and_reset_by_detection(client, tmp_path)
     job = client.post(f"/api/clips/{clip_id}/silence", json={}).json()["job"]
     assert wait_job(client, job)["state"] == "done"
     assert get_project(client)["clips"][0]["cuts_confirmed"] is False
+
+
+# ---- overlays (logo / photo) -------------------------------------------------------------------------
+def _logo(tmp_path, name="logo.png"):
+    import subprocess
+    p = str(tmp_path / name)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=64x32", "-frames:v", "1", p], check=True)
+    return p
+
+
+def test_overlay_add_edit_serve_delete(client, tmp_path):
+    r = client.post("/api/overlays", json={"path": _logo(tmp_path)})
+    assert r.status_code == 200
+    o = r.json()["overlay"]
+    assert (r.json()["width"], r.json()["height"]) == (64, 32)
+    assert client.get(f"/overlay-media/{o['id']}").status_code == 200
+    proj = get_project(client)
+    proj["overlays"][0].update(x=0.3, y=5, width=0.4, opacity=0.5, start=1.0, end=2.0, path="/etc/passwd")
+    assert client.put("/api/project", json=proj).status_code == 200
+    got = get_project(client)["overlays"][0]
+    assert (got["x"], got["y"], got["width"], got["opacity"], got["start"], got["end"]) == (0.3, 1.0, 0.4, 0.5, 1.0, 2.0)
+    assert got["path"] == o["path"]  # the page can't repoint the image at another file
+    assert client.delete(f"/api/overlays/{o['id']}").status_code == 200
+    assert get_project(client)["overlays"] == []
+    assert client.delete(f"/api/overlays/{o['id']}").status_code == 404
+
+
+def test_overlay_rejects_non_images_and_missing_files(client, tmp_path):
+    txt = tmp_path / "a.txt"
+    txt.write_text("hi")
+    assert client.post("/api/overlays", json={"path": str(txt)}).json()["error"]["code"] == "not_an_image"
+    assert client.post("/api/overlays", json={"path": str(tmp_path / "nope.png")}).status_code == 404
+
+
+def test_overlay_picker_override(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDCUT_PICK_IMAGE_OVERRIDE", _logo(tmp_path))
+    assert client.post("/api/overlays/pick").json()["overlay"]["path"].endswith("logo.png")

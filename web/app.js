@@ -10,6 +10,7 @@ import { initStage } from "./stage.js";
 import { initSubtitles } from "./subtitles.js";
 import { initStylePanel } from "./style_panel.js";
 import { initExportPanel } from "./export_panel.js";
+import { initOverlays } from "./overlays.js";
 import { $ } from "./util.js";
 
 async function main() {
@@ -21,6 +22,7 @@ async function main() {
   initStage();
   initSubtitles();
   initStylePanel();
+  initOverlays();
   initExportPanel();
   $("#btn-add").addEventListener("click", addClipFromDialog);
   $("#btn-add-path").addEventListener("click", () => addClipFromPath($("#path-input").value));

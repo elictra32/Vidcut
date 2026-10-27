@@ -137,3 +137,9 @@ button.danger { color: #ff8a8a; }
 .cuts-confirmed[hidden], button[hidden], canvas[hidden], .field[hidden] { display: none; }
 .sub-tools { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .sub-tools .sub-size { width: 90px; }
+#ov-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.ov { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; cursor: move; touch-action: none; user-select: none; }
+.ov-row { border-top: 1px solid var(--border, #333); padding: 8px 0; }
+.ov-thumb { width: 36px; height: 36px; object-fit: contain; background: #0003; border-radius: 4px; }
+.ov-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.ov-time { width: 80px; }

@@ -61,5 +61,5 @@ export function initStylePanel() {
     refs.bgOn.input.checked = st.bg_color != null;
     refs.bg_color.input.value = st.bg_color ?? "#000000";
   };
-  subscribe((why) => why !== "subs-text" && why !== "subs-pos" && why !== "select" && sync());
+  subscribe((why) => !why.startsWith("ov-") && why !== "subs-text" && why !== "subs-pos" && why !== "select" && sync());
 }
