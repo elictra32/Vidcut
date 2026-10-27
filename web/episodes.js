@@ -15,10 +15,8 @@ export function initEpisodes() {
   const planBtn = el("button", { id: "btn-plan-eps" }, "Plan episodes");
   const exportBtn = el("button", { id: "btn-export-eps", class: "primary" }, "Export all episodes");
 
-  const clipName = (id) => {
-    const c = getProject().clips.find((x) => x.id === id);
-    return c ? c.path.split(/[\\/]/).pop() : "";
-  };
+  let picks = []; // the intro chosen for each episode (clip ids)
+  let planned = null; // { limit, r } of the plan on screen
 
   async function plan() {
     out.replaceChildren();
@@ -27,10 +25,18 @@ export function initEpisodes() {
       out.replaceChildren(
         el("table", { class: "ep-table" },
           el("tr", {}, ...["EP", "From – to", "Length", "Size up to", "Intro"].map((h) => el("th", {}, h))),
-          ...r.episodes.map((e) => el("tr", {}, el("td", {}, String(e.index)), el("td", {}, `${fmtTime(e.start)} – ${fmtTime(e.end)}`),
-            el("td", {}, fmtTime(e.duration)), el("td", {}, `${mb(e.est_bytes)} MB`), el("td", { class: "ep-intro" }, clipName(e.intro_clip_id) || "—")))),
+          ...r.episodes.map((e, i) => {
+            const sel = el("select", { class: "ep-intro-pick", "aria-label": `Intro for episode ${e.index}` },
+              el("option", { value: "" }, "(none)"), ...r.intros.map((c) => el("option", { value: c.id, title: c.name }, c.name)));
+            sel.value = e.intro_clip_id ?? "";
+            sel.addEventListener("change", () => (picks[i] = sel.value));
+            return el("tr", {}, el("td", {}, String(e.index)), el("td", {}, `${fmtTime(e.start)} – ${fmtTime(e.end)}`),
+              el("td", {}, fmtTime(e.duration)), el("td", {}, `${mb(e.est_bytes)} MB`), el("td", { class: "ep-intro" }, sel));
+          })),
         r.intro_reused ? el("p", { class: "muted small" }, `You have ${r.intro_clips} intro clip(s) for ${r.episodes.length} episodes, so the last one is reused.`) : "",
         !r.intro_clips ? el("p", { class: "muted small" }, "No intro clips: add them in Clips and set their role to Intro, one per episode, in order.") : "");
+      picks = r.episodes.map((e) => e.intro_clip_id ?? "");
+      planned = { limit: +limit.value, r };
       return r;
     } catch (e) {
       showError(e);
@@ -40,12 +46,13 @@ export function initEpisodes() {
 
   planBtn.addEventListener("click", plan);
   exportBtn.addEventListener("click", async () => {
-    const r = await plan();
+    // keep the intro choices made in the table: only plan again when there is no plan for this limit
+    const r = planned && planned.limit === +limit.value ? planned.r : await plan();
     if (!r) return;
     if (!confirm(`Export ${r.episodes.length} episode(s), each under ${+limit.value} MB? This can take a while.`)) return;
     exportBtn.disabled = planBtn.disabled = true;
     try {
-      const { job } = await withSavedProject(() => api("POST", "/api/episodes/export", { max_mb: +limit.value }));
+      const { job } = await withSavedProject(() => api("POST", "/api/episodes/export", { max_mb: +limit.value, ...(picks.length ? { intro_ids: picks } : {}) }));
       const done = await trackJob("Exporting episodes", job);
       if (!done) return;
       const { files, dir, limit_mb } = done.result;

@@ -495,7 +495,8 @@ def create_app(home: str | None = None) -> FastAPI:
         with st.lock:
             snap = copy.deepcopy(st.project)
         eps, n_intros = episode_plan(snap, max_mb)
-        return {"episodes": [episode_json(e) for e in eps], "intro_clips": n_intros,
+        intros = [{"id": c.id, "name": os.path.basename(c.path)} for c in snap.clips if c.role == "intro"]
+        return {"episodes": [episode_json(e) for e in eps], "intro_clips": n_intros, "intros": intros,
                 "intro_reused": n_intros > 0 and n_intros < len(eps)}
 
     @app.post("/api/episodes/export")
@@ -504,6 +505,13 @@ def create_app(home: str | None = None) -> FastAPI:
         with st.lock:
             snap = copy.deepcopy(st.project)
         eps, _ = episode_plan(snap, max_mb)
+        chosen = (body or {}).get("intro_ids")  # the page lets the user pick each episode's intro
+        if chosen is not None:
+            valid = {c.id for c in snap.clips if c.role == "intro"}
+            if len(chosen) != len(eps) or any(i not in valid for i in chosen if i):
+                raise AppError("intro_choice_invalid", "The intro choice doesn't match the episodes", "Plan the episodes again")
+            for e, i in zip(eps, chosen):
+                e.intro_clip_id = i or None
         snap.export.quality = "auto"  # constant quality, capped per episode so each stays under the limit
         out_dir = snap.export.out_dir or st.exports
 

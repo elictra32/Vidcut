@@ -66,11 +66,16 @@ export function initClipsPanel() {
   const render = () => {
     const p = getProject();
     const list = el("ul", { class: "clip-list" });
+    let introNo = 0;
     for (const c of p?.clips ?? []) {
+      const role = c.role ?? "main";
+      if (role === "intro") introNo += 1;
+      const tag = role === "intro" ? `Intro for EP ${introNo}` : role === "outro" ? "Outro: end of every EP" : "";
       list.append(el("li", { class: c.id === ui.currentClipId ? "active" : "" },
         el("button", { class: "clip-main", onclick: () => (setCurrentClip(c.id), player.showClip(c.id)) },
           el("span", { class: "clip-name", title: c.path }, basename(c.path)),
-          el("span", { class: "muted" }, `${fmtTime(c.duration)} · ${c.width}×${c.height}${c.has_audio ? "" : " · no audio"}`)),
+          el("span", { class: "muted" }, `${fmtTime(c.duration)} · ${c.width}×${c.height}${c.has_audio ? "" : " · no audio"}`),
+          tag ? el("span", { class: "role-tag", "data-role": role }, tag) : ""),
         el("select", { class: "role", "aria-label": "Clip role", title: "Intro/outro clips are joined before/after the selection on export",
           onchange: (e) => setRole(c.id, e.target.value) },
           Object.entries(ROLE_LABELS).map(([v, label]) => el("option", { value: v, selected: (c.role ?? "main") === v }, label))),

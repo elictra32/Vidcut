@@ -25,10 +25,14 @@ try {
   page.on("dialog", (d) => d.accept());
   await page.goto(app.base);
   await page.waitForSelector("#btn-plan-eps");
+  const tags = await page.$$eval(".role-tag", (els) => els.map((e) => e.textContent));
+  must(JSON.stringify(tags) === JSON.stringify(["Intro for EP 1", "Intro for EP 2", "Outro: end of every EP"]), "the clip list says which intro is for which episode: " + tags.join(" | "));
   await page.fill("#ep-limit", "5");
   await page.click("#btn-plan-eps");
   await page.waitForSelector(".ep-table tr:nth-child(3)", { timeout: 10000 });
   must((await page.$$(".ep-table tr")).length === 3, "the plan shows two episodes (plus the header row)");
+  must((await page.$$(".ep-intro-pick")).length === 2, "each episode row has an intro picker");
+  await page.locator(".ep-intro-pick").first().selectOption({ index: 2 }); // episode 1 takes the second intro
   await page.click("#btn-export-eps");
   await page.waitForSelector(".ep-file", { timeout: 280000 });
   must((await page.$$(".ep-file")).length === 2, "both episodes were exported");

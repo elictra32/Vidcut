@@ -766,3 +766,17 @@ def test_align_with_an_unrelated_original_is_a_clear_error(client, tmp_path):
     cid = add_clip(client, str(tmp_path / "a.mp4"))["clip"]["id"]
     j = wait_job(client, client.post(f"/api/clips/{cid}/align", json={"original_path": str(tmp_path / "b.mp4")}).json()["job"])
     assert j["state"] == "error" and j["error"]["code"] == "align_failed"
+
+
+def test_episode_export_uses_the_intro_chosen_for_each_episode(client, tmp_path):
+    _, i1, i2, _ = _episode_project(client, tmp_path)
+    out = str(tmp_path / "eps2")
+    client.post("/api/export-folder", json={"path": out})
+    bad = client.post("/api/episodes/export", json={"max_mb": 5, "intro_ids": [i1]}).json()
+    assert bad["error"]["code"] == "intro_choice_invalid"
+    plan = client.post("/api/episodes/plan", json={"max_mb": 5}).json()
+    assert [c["name"] for c in plan["intros"]] == ["i1.mp4", "i2.mp4"]
+    j = wait_job(client, client.post("/api/episodes/export", json={"max_mb": 5, "intro_ids": [i2, i1]}).json()["job"], timeout=200)
+    assert j["state"] == "done", j
+    durs = [media.probe(os.path.join(out, f["video"]))["duration"] for f in j["result"]["files"]]
+    assert durs[0] == pytest.approx(30 + 3 + 1, abs=0.6) and durs[1] == pytest.approx(30 + 2 + 1, abs=0.6)
