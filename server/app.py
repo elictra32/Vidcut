@@ -35,6 +35,7 @@ from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
 from core.timeline import cut_points, edited_duration, enabled_keeps
 from core.rewrap import rewrap_subtitles
+from core.sizing import measure_kbps
 from core.srt import parse_srt
 from core.srt_import import cues_to_subtitles
 from core.highlights import LEXICON, find_highlights, lines_from_project, transcript_for_ai
@@ -60,6 +61,7 @@ class State:
         self.exports = os.path.join(home, "exports")
         self.proxies = os.path.join(home, "proxies")
         self.covers = os.path.join(home, "covers")
+        self.manifests = os.path.join(home, "manifests")
         self.lock = threading.RLock()
         self.project = load_project(home)
         self.jobs = JobRunner()
@@ -403,13 +405,18 @@ def create_app(home: str | None = None) -> FastAPI:
     # ---- captions made for the ORIGINAL video, but the clip here is a cut version of it ------------------------
     @app.get("/api/clips/{clip_id}/cut-manifest")
     def get_cut_manifest(clip_id: str):
-        """The .vidcut.json that Vidcut writes next to an export, if it is next to this clip."""
+        """The cut map Vidcut saved when it exported this clip (see core/export.write_cut_manifest), if there is one."""
         clip = st.clip(clip_id)
-        path = manifest_path(clip.path)
+        # kept in Vidcut's own folder (matched by file name and size); a copy next to the video works too
+        path = manifest_path(clip.path, st.manifests)
+        if not os.path.isfile(path):
+            path = manifest_path(clip.path)
         if not os.path.isfile(path):
             return {"found": False}
         try:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
+            if data.get("bytes") and os.path.isfile(clip.path) and data["bytes"] != os.path.getsize(clip.path):
+                return {"found": False}  # a different file with the same name
             sources = [{"name": s["name"], "role": s.get("role", "main"), "pieces": s["pieces"]} for s in data["sources"]]
             pieces_from_dicts(sources[0]["pieces"] if sources else [])
         except (OSError, ValueError, KeyError, TypeError, IndexError):
@@ -583,7 +590,7 @@ def create_app(home: str | None = None) -> FastAPI:
         return {"job": st.jobs.submit(work, "covers")}
 
     # ---- split into episodes (each under a size limit, own intro, shared outro) ---------------------
-    def episode_plan(snap: Project, max_mb: float):
+    def episode_plan(snap: Project, max_mb: float, measured_kbps: float | None = None):
         if max_mb < 5:
             raise AppError("episode_limit_too_small", "The size limit is too small", "Use at least 5 MB per episode")
         sel = snap.selection or Selection(0.0, edited_duration(snap.clips))
@@ -597,7 +604,8 @@ def create_app(home: str | None = None) -> FastAPI:
         try:
             eps = plan_episodes(cut_points(snap.clips), sel.start, sel.end, max_bytes=max_mb * 1048576,
                                 source_kbps=source_video_kbps(snap.clips), preset=snap.preset,
-                                container=_normalized(snap.export).container, intros=intros, outro_dur=outro)
+                                container=_normalized(snap.export).container, intros=intros, outro_dur=outro,
+                                measured_kbps=measured_kbps)
         except ValueError as e:
             raise AppError("episode_limit_too_small", "The size limit is too small for these intro/outro clips",
                            "Raise the limit or use shorter intro/outro clips") from e
@@ -605,11 +613,11 @@ def create_app(home: str | None = None) -> FastAPI:
 
     def episode_json(e) -> dict:
         return {"index": e.index, "start": e.start, "end": e.end, "duration": e.duration, "intro_clip_id": e.intro_clip_id,
-                "video_kbps": e.video_kbps, "est_bytes": e.est_bytes}
+                "video_kbps": e.video_kbps, "est_bytes": e.est_bytes, "max_bytes": e.max_bytes}
 
-    def prepare_episodes(snap: Project, max_mb: float, chosen):
+    def prepare_episodes(snap: Project, max_mb: float, chosen, measured_kbps: float | None = None):
         """The episode plan for `snap`, with the page's own intro choices applied (one clip id per episode)."""
-        eps, _ = episode_plan(snap, max_mb)
+        eps, _ = episode_plan(snap, max_mb, measured_kbps)
         if chosen is not None:
             valid = {c.id for c in snap.clips if c.role == "intro"}
             if len(chosen) != len(eps) or any(i not in valid for i in chosen if i):
@@ -621,8 +629,8 @@ def create_app(home: str | None = None) -> FastAPI:
 
     def run_single_export(snap: Project, progress, cancel) -> dict:
         out_dir = snap.export.out_dir or st.exports
-        res = run_export(snap, out_dir, progress, cancel)
-        return {"video": os.path.basename(res.video), "srt": os.path.basename(res.srt), "dir": out_dir,
+        res = run_export(snap, out_dir, progress, cancel, manifest_dir=st.manifests)
+        return {"video": os.path.basename(res.video), "srt": os.path.basename(res.srt) if res.srt else None, "dir": out_dir,
                 "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
 
     def run_episode_set(snap: Project, eps, max_mb: float, progress, cancel) -> dict:
@@ -635,9 +643,11 @@ def create_app(home: str | None = None) -> FastAPI:
 
             def report(f, m="", base=base, span=span, e=e):
                 progress(base + span * f, f"Episode {e.index}/{len(eps)} · {m}" if m else f"Episode {e.index}/{len(eps)}")
+            intro = next((c for c in snap.clips if c.id == e.intro_clip_id), None)
             res = run_export(snap, out_dir, report, cancel, selection=Selection(e.start, e.end),
                              intro_ids=[e.intro_clip_id] if e.intro_clip_id else None,
-                             name_suffix=f"_EP{e.index:02d}", max_video_kbps=e.video_kbps)
+                             name_suffix=f"_EP{e.index:02d}", max_video_kbps=e.video_kbps, manifest_dir=st.manifests,
+                             name=Path(intro.path).stem if intro else None)  # an episode is named after its cover
             size = os.path.getsize(res.video)
             files.append({"video": os.path.basename(res.video), "bytes": size, "over_limit": size > max_mb * 1048576})
             done += e.duration
@@ -651,7 +661,7 @@ def create_app(home: str | None = None) -> FastAPI:
     def queue_episodes(project_dict: dict, params: dict, progress, cancel) -> dict:
         snap = project_from_dict(project_dict)
         max_mb = float(params.get("max_mb", 500))
-        return run_episode_set(snap, prepare_episodes(snap, max_mb, params.get("intro_ids")), max_mb, progress, cancel)
+        return run_episode_set(snap, prepare_episodes(snap, max_mb, params.get("intro_ids"), params.get("measured_kbps")), max_mb, progress, cancel)
 
     st.queue = JobQueue(st.home, {"export": queue_export, "episodes": queue_episodes},
                         busy=lambda: st.jobs.active(ignore=("proxy",)) > 0)
@@ -691,7 +701,7 @@ def create_app(home: str | None = None) -> FastAPI:
                 raise from_exception(e) from e
             label = f"Export · {describe(snap)}"
         else:
-            prepare_episodes(copy.deepcopy(snap), float(params.get("max_mb", 500)), params.get("intro_ids"))  # validates now
+            prepare_episodes(copy.deepcopy(snap), float(params.get("max_mb", 500)), params.get("intro_ids"), params.get("measured_kbps"))  # validates now
             label = f"Episodes (≤ {float(params.get('max_mb', 500)):g} MB) · {describe(snap)}"
         return st.queue.add(kind, label, params, project_to_dict(snap))
 
@@ -732,17 +742,24 @@ def create_app(home: str | None = None) -> FastAPI:
         max_mb = float((body or {}).get("max_mb", 500))
         with st.lock:
             snap = copy.deepcopy(st.project)
-        eps, n_intros = episode_plan(snap, max_mb)
+        measured = (body or {}).get("measured_kbps")
+        if measured is None and (body or {}).get("measure", True):
+            # encode a few short samples of this footage: the real size is far below the worst-case cap for easy footage
+            q = copy.deepcopy(snap)
+            q.export.quality = "auto"
+            sel = q.selection or Selection(0.0, edited_duration(q.clips))
+            measured = measure_kbps(q, sel.start, sel.end)
+        eps, n_intros = episode_plan(snap, max_mb, measured)
         intros = [{"id": c.id, "name": os.path.basename(c.path)} for c in snap.clips if c.role == "intro"]
         return {"episodes": [episode_json(e) for e in eps], "intro_clips": n_intros, "intros": intros,
-                "intro_reused": n_intros > 0 and n_intros < len(eps)}
+                "intro_reused": n_intros > 0 and n_intros < len(eps), "measured_kbps": measured}
 
     @app.post("/api/episodes/export")
     def post_episodes_export(body: dict | None = None):
         max_mb = float((body or {}).get("max_mb", 500))
         with st.lock:
             snap = copy.deepcopy(st.project)
-        eps = prepare_episodes(snap, max_mb, (body or {}).get("intro_ids"))
+        eps = prepare_episodes(snap, max_mb, (body or {}).get("intro_ids"), (body or {}).get("measured_kbps"))
         return {"job": st.jobs.submit(lambda progress, cancel: run_episode_set(snap, eps, max_mb, progress, cancel), "export")}
 
     def set_export_folder(path: str) -> dict:

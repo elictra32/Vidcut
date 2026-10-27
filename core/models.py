@@ -98,6 +98,7 @@ class ExportSettings:
     quality: str = "auto"  # auto | high | medium | small | custom (auto = constant quality, capped; custom uses target_mb)
     target_mb: float | None = None
     out_dir: str = ""  # "" = the default exports folder; set by the server only
+    filename: str = ""  # "" = automatic (source name + preset); otherwise the name to give the file (no extension)
 
 
 @dataclass

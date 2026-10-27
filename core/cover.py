@@ -16,6 +16,7 @@ import numpy as np
 from core import media
 from core.fonts import FONT_FILES, FONTS_DIR, ass_size_factor, text_advance
 from core.media import Cancelled, FFmpegError, find_ffmpeg
+from core.names import safe_stem  # noqa: F401  (re-exported: the server imports it from here)
 
 W, H = 1920, 1080
 FPS = 30
@@ -209,10 +210,3 @@ THAI_MONTHS = ["มกราคม", "กุมภาพันธ์", "มี�
 def thai_date(year: int, month: int, day: int) -> str:
     """'วันที่ 22 ตุลาคม  2569' (Buddhist-era year; two spaces before it, as in the sample covers)."""
     return f"วันที่ {day} {THAI_MONTHS[month - 1]}  {year + 543}"
-
-
-def safe_stem(title: str, limit: int = 80) -> str:
-    """A file name stem from a title: no characters Windows forbids, spaces collapsed."""
-    s = "".join("_" if ch in '<>:"/\\|?*' or ord(ch) < 32 else ch for ch in title).strip(" .")
-    s = " ".join(s.split())
-    return (s[:limit].rstrip(" .") or "cover")

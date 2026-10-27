@@ -5,7 +5,7 @@ import { trackJob } from "./status.js";
 import { showError } from "./toast.js";
 import * as tm from "./timeline_math.js";
 import * as player from "./player.js";
-import { $, el, fmtTime } from "./util.js";
+import { $, basename, el, fmtTime } from "./util.js";
 
 const LABELS = { tiktok: "TikTok 9:16", youtube: "YouTube 16:9" };
 const currentClip = () => {
@@ -73,6 +73,10 @@ export function initExportPanel() {
       showError(e);
     }
   };
+  const fileName = el("input", { type: "text", id: "opt-filename", maxlength: 120 });
+  fileName.addEventListener("change", () => setExport({ filename: fileName.value.trim() }));
+  const fileNameRow = el("label", { class: "field" }, el("span", {}, "File name (without .mp4 etc.)"), fileName,
+    el("span", { class: "muted small" }, "Empty = automatic. Episodes are named after their cover clip, e.g. “Candlestick and Price Pattern II P1”."));
   const folderRow = el("div", { class: "field" }, el("span", {}, "Save to"), folderText,
     el("div", { class: "row" },
       el("button", { id: "opt-folder-pick", onclick: () => setFolder(() => api("POST", "/api/export-folder/pick")) }, "Choose folder…"),
@@ -119,7 +123,7 @@ export function initExportPanel() {
       const { video, srt, dir, downloadable } = done.result;
       const link = (name, label) => el("a", { href: `/exports/${encodeURIComponent(name)}`, download: name }, label);
       result.replaceChildren(el("strong", {}, "Export finished"),
-        downloadable ? el("div", { class: "row" }, link(video, `Download .${video.split(".").pop()}`), link(srt, "Download .srt")) : "",
+        downloadable ? el("div", { class: "row" }, link(video, `Download .${video.split(".").pop()}`), srt ? link(srt, "Download .srt") : "") : "",
         el("p", { class: "muted small" }, `File ${video} is in folder: ${dir}`));
     } catch (e) {
       showError(e);
@@ -130,7 +134,7 @@ export function initExportPanel() {
 
   root.replaceChildren(el("h2", {}, "Export"), seg, framing,
     el("label", { class: "field" }, el("span", {}, "File type"), container),
-    el("label", { class: "field" }, el("span", {}, "Quality / size"), quality), targetRow, folderRow, estimate,
+    el("label", { class: "field" }, el("span", {}, "Quality / size"), quality), targetRow, fileNameRow, folderRow, estimate,
     el("label", { class: "field inline" }, el("span", {}, "Show app UI safe zone"), safe),
     el("div", { class: "row" }, el("button", { onclick: checkFrame }, "Check real frame"), exportBtn,
       el("button", { id: "btn-queue-export", title: "Add this export to the queue instead of running it now", onclick: () => addToQueue("export") }, "Add to queue")), result);
@@ -143,6 +147,9 @@ export function initExportPanel() {
     quality.value = p.export.quality;
     targetRow.hidden = p.export.quality !== "custom";
     if (document.activeElement !== target) target.value = p.export.target_mb ?? "";
+    if (document.activeElement !== fileName) fileName.value = p.export.filename ?? "";
+    const mainClip = p.clips.find((c) => (c.role ?? "main") === "main");
+    fileName.placeholder = mainClip ? `${basename(mainClip.path).replace(/\.[^.]+$/, "")}_${p.preset}` : "automatic";
     folderText.textContent = p.export.out_dir || "App default folder (VidcutProjects\\default\\exports)";
     refreshEstimate();
     seg.replaceChildren(...Object.keys(presets).map((k) =>

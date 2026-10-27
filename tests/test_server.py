@@ -168,8 +168,9 @@ def test_transcribe_no_audio_returns_thai_error(client, tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not has_libass(), reason="ffmpeg without libass")
 def test_export_job_produces_mp4_and_srt(client, tmp_path):
-    add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))
-    put_project(client, selection={"start": 0, "end": 2})
+    cid = add_clip(client, make_clip(str(tmp_path / "a.mp4"), [("tone", 4)]))["clip"]["id"]
+    put_project(client, selection={"start": 0, "end": 2},
+                subtitles=[{"id": "s", "clip_id": cid, "src_start": 0.2, "src_end": 1.5, "text": "สวัสดี", "x": None, "y": None, "scale": None}])
     j = wait_job(client, client.post("/api/export", json={"preset": "youtube"}).json()["job"])
     assert j["state"] == "done", j
     mp4, srt = j["result"]["video"], j["result"]["srt"]
@@ -637,7 +638,7 @@ def _episode_project(client, tmp_path):
 
 def test_episode_plan_splits_by_size_and_assigns_intros(client, tmp_path):
     _, i1, i2, _ = _episode_project(client, tmp_path)
-    r = client.post("/api/episodes/plan", json={"max_mb": 5}).json()
+    r = client.post("/api/episodes/plan", json={"max_mb": 5, "measure": False}).json()
     eps = r["episodes"]
     assert len(eps) == 2 and r["intro_clips"] == 2 and not r["intro_reused"]
     assert eps[0]["start"] == 0 and eps[0]["end"] == eps[1]["start"] and eps[1]["end"] == pytest.approx(60, abs=0.5)
@@ -658,7 +659,7 @@ def test_episode_export_writes_numbered_files_each_with_its_own_intro_and_the_ou
     j = wait_job(client, job, timeout=200)
     assert j["state"] == "done", j
     files = j["result"]["files"]
-    assert [f["video"] for f in files] == ["main_tiktok_EP01.mp4", "main_tiktok_EP02.mp4"]
+    assert [f["video"] for f in files] == ["i1.mp4", "i2.mp4"]
     assert not any(f["over_limit"] for f in files)
     durs = [media.probe(os.path.join(out, f["video"]))["duration"] for f in files]
     assert durs[0] == pytest.approx(30 + 2 + 1, abs=0.6) and durs[1] == pytest.approx(30 + 3 + 1, abs=0.6)
@@ -689,7 +690,7 @@ def test_highlights_find_the_scolding_part_and_export_a_transcript(client, tmp_p
 
 
 # ---- captions for an original video, applied to its cut version ------------------------------------------------
-def test_export_writes_a_manifest_next_to_the_video(client, tmp_path):
+def test_export_keeps_the_cut_map_in_vidcuts_folder_not_next_to_the_video(client, tmp_path):
     from core.export import manifest_path
     add_clip(client, make_clip(str(tmp_path / "m.mp4"), [("tone", 4)], size="320x180"))
     out = str(tmp_path / "o")
@@ -697,7 +698,12 @@ def test_export_writes_a_manifest_next_to_the_video(client, tmp_path):
     put_project(client, selection={"start": 1, "end": 3})
     j = wait_job(client, client.post("/api/export").json()["job"], timeout=120)
     assert j["state"] == "done"
-    mf = json.loads(open(manifest_path(os.path.join(out, j["result"]["video"])), encoding="utf-8").read())
+    video = os.path.join(out, j["result"]["video"])
+    assert sorted(os.listdir(out)) == [j["result"]["video"]]  # no .srt (there are no subtitles) and no map beside the video
+    assert j["result"]["srt"] is None
+    home = client.app.state.st.home
+    mf = json.loads(open(manifest_path(video, os.path.join(home, "manifests")), encoding="utf-8").read())
+    assert mf["bytes"] == os.path.getsize(video)
     assert mf["version"] == 1 and mf["sources"][0]["name"] == "m.mp4" and mf["sources"][0]["role"] == "main"
     piece = mf["sources"][0]["pieces"][0]
     assert piece["src_start"] == pytest.approx(1.0, abs=0.05) and piece["out_start"] == 0.0
@@ -774,7 +780,7 @@ def test_episode_export_uses_the_intro_chosen_for_each_episode(client, tmp_path)
     client.post("/api/export-folder", json={"path": out})
     bad = client.post("/api/episodes/export", json={"max_mb": 5, "intro_ids": [i1]}).json()
     assert bad["error"]["code"] == "intro_choice_invalid"
-    plan = client.post("/api/episodes/plan", json={"max_mb": 5}).json()
+    plan = client.post("/api/episodes/plan", json={"max_mb": 5, "measure": False}).json()
     assert [c["name"] for c in plan["intros"]] == ["i1.mp4", "i2.mp4"]
     j = wait_job(client, client.post("/api/episodes/export", json={"max_mb": 5, "intro_ids": [i2, i1]}).json()["job"], timeout=200)
     assert j["state"] == "done", j
@@ -908,3 +914,27 @@ def test_brand_logos_are_listed_served_and_can_be_added_as_overlays(client):
     r = client.post("/api/overlays", json={"brand": "THUS_logo_white.png"})
     assert r.status_code == 200 and r.json()["overlay"]["path"].endswith("THUS_logo_white.png")
     assert client.post("/api/overlays", json={"brand": "../server/app.py"}).status_code == 404   # only the shipped files
+
+
+def test_episode_files_are_named_after_their_cover_clips(client, tmp_path):
+    main, i1, i2, _ = _episode_project(client, tmp_path)
+    out = str(tmp_path / "named")
+    client.post("/api/export-folder", json={"path": out})
+    j = wait_job(client, client.post("/api/episodes/export", json={"max_mb": 5}).json()["job"], timeout=200)
+    assert j["state"] == "done", j
+    assert [f["video"] for f in j["result"]["files"]] == ["i1.mp4", "i2.mp4"]  # the intro clips here are i1.mp4 and i2.mp4
+    assert sorted(os.listdir(out)) == ["i1.mp4", "i2.mp4"]                       # and nothing else beside them
+
+
+def test_episode_plan_measures_the_real_size_and_needs_fewer_episodes(client, tmp_path):
+    _episode_project(client, tmp_path)
+    worst = client.post("/api/episodes/plan", json={"max_mb": 8, "measure": False}).json()
+    assert worst["measured_kbps"] is None and len(worst["episodes"]) == 2
+    real = client.post("/api/episodes/plan", json={"max_mb": 8}).json()
+    assert real["measured_kbps"] is not None
+    assert len(real["episodes"]) == 1                                  # measured, the footage fits in one file
+    e = real["episodes"][0]
+    assert e["est_bytes"] < e["max_bytes"] <= 8 * 1048576              # expected size below the encoder's hard cap
+    assert e["est_bytes"] < worst["episodes"][0]["est_bytes"] * 2
+    forced = client.post("/api/episodes/plan", json={"max_mb": 8, "measured_kbps": 5000}).json()   # a caller may pass its own
+    assert forced["measured_kbps"] == 5000 and len(forced["episodes"]) >= 2

@@ -23,6 +23,8 @@ try {
   page.on("console", (m) => m.type() === "error" && problems.push(m.text()));
   page.on("pageerror", (e) => problems.push(e.message));
   page.on("dialog", (d) => d.accept());
+  // these tiny test clips would measure as "fits in one file"; plan from the worst-case cap so the split is exercised
+  await page.route("**/api/episodes/plan", (route) => route.continue({ postData: JSON.stringify({ ...JSON.parse(route.request().postData() || "{}"), measure: false }) }));
   await page.goto(app.base);
   await page.waitForSelector("#btn-plan-eps");
   const tags = await page.$$eval(".role-tag", (els) => els.map((e) => e.textContent));
@@ -37,7 +39,8 @@ try {
   await page.waitForSelector(".ep-file", { timeout: 280000 });
   must((await page.$$(".ep-file")).length === 2, "both episodes were exported");
   const names = await page.$$eval(".ep-file", (els) => els.map((e) => e.textContent));
-  must(/EP01/.test(names[0]) && /EP02/.test(names[1]), "files are numbered EP01, EP02: " + names.join(" | "));
+  // episode 1 was switched to the second intro (i2) and episode 2 keeps i2, so the second name gets _2: files are never overwritten
+  must(/^i2\.mp4/.test(names[0]) && /^i2_2\.mp4/.test(names[1]), "files are named after their cover clips: " + names.join(" | "));
   must(!names.some((n) => /over the/.test(n)), "no episode is over the limit");
   must(problems.length === 0, "no console errors" + (problems.length ? ": " + problems.join(" | ") : ""));
 } catch (e) {

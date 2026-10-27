@@ -22,17 +22,18 @@ export function initEpisodes() {
   async function plan() {
     out.replaceChildren();
     try {
+      planBtn.textContent = "Measuring…"; // the plan encodes a few short samples to learn the real size of this footage
       const r = await withSavedProject(() => api("POST", "/api/episodes/plan", { max_mb: +limit.value }));
       out.replaceChildren(
         el("table", { class: "ep-table" },
-          el("tr", {}, ...["EP", "From – to", "Length", "Size up to", "Intro"].map((h) => el("th", {}, h))),
+          el("tr", {}, ...["EP", "From – to", "Length", "Size", "Intro"].map((h) => el("th", {}, h))),
           ...r.episodes.map((e, i) => {
             const sel = el("select", { class: "ep-intro-pick", "aria-label": `Intro for episode ${e.index}` },
               el("option", { value: "" }, "(none)"), ...r.intros.map((c) => el("option", { value: c.id, title: c.name }, c.name)));
             sel.value = e.intro_clip_id ?? "";
             sel.addEventListener("change", () => (picks[i] = sel.value));
             return el("tr", {}, el("td", {}, String(e.index)), el("td", {}, `${fmtTime(e.start)} – ${fmtTime(e.end)}`),
-              el("td", {}, fmtTime(e.duration)), el("td", {}, `${mb(e.est_bytes)} MB`), el("td", { class: "ep-intro" }, sel));
+              el("td", {}, fmtTime(e.duration)), el("td", { title: `About ${mb(e.est_bytes)} MB; the encoder never goes above ${mb(e.max_bytes || e.est_bytes)} MB` }, `≈ ${mb(e.est_bytes)} MB`), el("td", { class: "ep-intro" }, sel));
           })),
         r.intro_reused ? el("p", { class: "muted small" }, `You have ${r.intro_clips} intro clip(s) for ${r.episodes.length} episodes, so the last one is reused.`) : "",
         !r.intro_clips ? el("p", { class: "muted small" }, "No intro clips: add them in Clips and set their role to Intro, one per episode, in order.") : "");
@@ -42,6 +43,8 @@ export function initEpisodes() {
     } catch (e) {
       showError(e);
       return null;
+    } finally {
+      planBtn.textContent = "Plan episodes";
     }
   }
 
@@ -53,7 +56,7 @@ export function initEpisodes() {
     if (!confirm(`Export ${r.episodes.length} episode(s), each under ${+limit.value} MB? This can take a while.`)) return;
     exportBtn.disabled = planBtn.disabled = true;
     try {
-      const { job } = await withSavedProject(() => api("POST", "/api/episodes/export", { max_mb: +limit.value, ...(picks.length ? { intro_ids: picks } : {}) }));
+      const { job } = await withSavedProject(() => api("POST", "/api/episodes/export", { max_mb: +limit.value, ...(picks.length ? { intro_ids: picks } : {}), ...(planned?.r.measured_kbps ? { measured_kbps: planned.r.measured_kbps } : {}) }));
       const done = await trackJob("Exporting episodes", job);
       if (!done) return;
       const { files, dir, limit_mb } = done.result;
@@ -74,6 +77,6 @@ export function initEpisodes() {
     el("div", { class: "row" }, planBtn, exportBtn,
       el("button", { id: "btn-queue-eps", title: "Add all episodes to the queue instead of running them now", onclick: async () => {
         const r = planned && planned.limit === +limit.value ? planned.r : await plan();
-        if (r) addToQueue("episodes", { max_mb: +limit.value, ...(picks.length ? { intro_ids: picks } : {}) });
+        if (r) addToQueue("episodes", { max_mb: +limit.value, ...(picks.length ? { intro_ids: picks } : {}), ...(planned?.r.measured_kbps ? { measured_kbps: planned.r.measured_kbps } : {}) });
       } }, "Add to queue")), out);
 }

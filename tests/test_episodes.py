@@ -67,3 +67,30 @@ def test_a_limit_too_small_for_the_floor_is_an_error():
 def test_cut_points_are_where_pieces_begin():
     c = Clip("c1", "/a.mp4", 100, 10, 10, 25, True, keeps=[Keep(0, 10), Keep(20, 30), Keep(50, 55, enabled=False), Keep(60, 70)])
     assert cut_points([c]) == [10.0, 20.0]
+
+
+def test_a_measured_bitrate_lets_episodes_be_longer_and_fewer():
+    worst = plan(81 * 60 + 50, source_kbps=1850)              # planned from the worst-case cap: 2 episodes
+    assert len(worst) == 2
+    measured = plan(81 * 60 + 50, source_kbps=1850, measured_kbps=520)   # the footage really needs about 0.5 Mbps
+    assert len(measured) == 1
+    e = measured[0]
+    assert e.est_bytes < 500 * MB * 0.92                     # expected to fit with room to spare
+    assert e.max_bytes <= 500 * MB                           # and the encoder's cap can never exceed the limit
+    assert e.est_bytes < e.max_bytes
+
+
+def test_the_measurement_never_raises_the_cap_and_the_guard_still_bounds_every_episode():
+    eps = plan(5 * 3600, source_kbps=1850, measured_kbps=9000)   # a measurement above the cap is capped
+    floor, cap = quality_range("tiktok", 1850)
+    assert all(e.video_kbps <= cap and e.max_bytes <= 500 * MB for e in eps)
+    assert len(eps) >= len(plan(5 * 3600, source_kbps=1850, measured_kbps=520))
+
+
+def test_sample_windows_spread_evenly_and_shrink_for_short_ranges():
+    from core.sizing import sample_windows
+    ws = sample_windows(0, 3600)
+    assert len(ws) == 4 and ws[0][0] == 0 and ws[-1][1] == 3600 and all(b - a == 8 for a, b in ws)
+    assert sample_windows(100, 105) == [(100, 105)]
+    assert sample_windows(0, 20) == [(0, 8), (12, 20)]
+    assert sample_windows(5, 5) == []

@@ -295,7 +295,7 @@ def test_export_in_each_container(tmp_path, container, fmt_part, vcodec, acodec)
     proj = real_project(p, preset="youtube", sel=(0, 2))
     proj.export = ExportSettings(container=container)
     res = run_export(proj, str(tmp_path / "out"))
-    assert res.video.endswith("." + container) and res.srt.endswith(".srt")
+    assert res.video.endswith("." + container) and res.srt is None  # no subtitles: no empty .srt
     fmt, codecs = format_of(res.video)
     assert fmt_part in fmt and codecs["video"] == vcodec and codecs["audio"] == acodec
 
@@ -315,7 +315,7 @@ def test_export_to_a_chosen_folder_with_spaces_and_thai(tmp_path):
     p = make_clip(str(tmp_path / "in.mp4"), SPEC)
     target = tmp_path / "โฟลเดอร์ ส่งออก" / "งาน 1"
     res = run_export(real_project(p, sel=(0, 2)), str(target))
-    assert os.path.dirname(res.video) == str(target) and os.path.exists(res.srt)
+    assert os.path.dirname(res.video) == str(target) and os.path.exists(res.video)
 
 
 def test_auto_quality_export_of_easy_footage_is_far_below_the_cap(tmp_path):
@@ -369,3 +369,32 @@ def test_thai_tone_marks_over_upper_vowels_are_drawn_above_them(tmp_path, font):
         changed = np.abs(frame([Subtitle("s", "c1", 0.0, 2.0, text)]) - base) > 60
         return int(np.where(changed.any(axis=1))[0].min())
     assert top_ink_row("ที่") < top_ink_row("ที") - 8
+
+
+def test_output_name_follows_the_main_clip_not_an_intro_listed_first(tmp_path):
+    from core.export import _output_stem
+    intro = Clip("i", str(tmp_path / "My Cover.mp4"), 3, 1920, 1080, 30, True, keeps=[Keep(0, 3)], role="intro")
+    main = Clip("m", str(tmp_path / "2026-10-22 20-30-41.mp4"), 60, 1920, 1080, 30, True, keeps=[Keep(0, 60)])
+    proj = Project(clips=[intro, main])
+    assert _output_stem(proj, "youtube", "", None) == "2026-10-22_20-30-41_youtube"
+
+
+def test_a_typed_file_name_wins_and_is_cleaned(tmp_path):
+    from core.export import _output_stem
+    main = Clip("m", str(tmp_path / "a.mp4"), 60, 1920, 1080, 30, True, keeps=[Keep(0, 60)])
+    proj = Project(clips=[main])
+    proj.export.filename = 'EP 1: "Intro" / Part?'
+    assert _output_stem(proj, "tiktok", "", None) == "EP 1_ _Intro_ _ Part_"
+    assert _output_stem(proj, "tiktok", "", "Candlestick and Price Pattern II P1") == "Candlestick and Price Pattern II P1"  # the caller's name first
+    proj.export.filename = "   "
+    assert _output_stem(proj, "tiktok", "_EP02", None) == "a_tiktok_EP02"
+
+
+def test_the_name_is_used_for_the_file(tmp_path):
+    p = make_clip(str(tmp_path / "in.mp4"), SPEC)
+    proj = real_project(p, sel=(0, 2))
+    proj.export.filename = "My Episode"
+    res = run_export(proj, str(tmp_path / "out"))
+    assert os.path.basename(res.video) == "My Episode.mp4"
+    again = run_export(proj, str(tmp_path / "out"))
+    assert os.path.basename(again.video) == "My Episode_2.mp4"  # never overwrites

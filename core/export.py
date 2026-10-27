@@ -15,6 +15,7 @@ from core import media
 from core.ass import RenderedSub, to_ass, to_srt
 from core.encode import encoder_args, output_extension, source_video_kbps
 from core.media import Cancelled, FFmpegError  # noqa: F401  (Cancelled re-exported for callers)
+from core.names import safe_stem
 from core.models import Clip, ExportSettings, Overlay, Project, Selection
 from core.presets import PRESETS, Preset
 from core.timeline import Piece, edited_duration, enabled_keeps, selection_pieces, subtitles_for_export
@@ -36,7 +37,7 @@ class ExportError(Exception):
 @dataclass
 class ExportResult:
     video: str
-    srt: str
+    srt: str | None  # None when the video has no subtitles: an empty .srt file would only be clutter
 
 
 def _fmt(x: float) -> str:
@@ -208,13 +209,17 @@ ASS_FILTER = "ass={name}:fontsdir=fonts:shaping=complex"
 MANIFEST_SUFFIX = ".vidcut.json"
 
 
-def manifest_path(video_path: str) -> str:
+def manifest_path(video_path: str, manifest_dir: str | None = None) -> str:
+    """Where the cut map of an exported video is kept: in `manifest_dir` (Vidcut's own folder, so the export folder stays
+    clean), or next to the video when no folder is given."""
+    if manifest_dir:
+        return os.path.join(manifest_dir, os.path.basename(video_path) + MANIFEST_SUFFIX)
     return os.path.splitext(video_path)[0] + MANIFEST_SUFFIX
 
 
-def write_cut_manifest(video_path: str, clips: list[Clip], pieces: list[Piece]) -> None:
-    """A small file next to the exported video saying which parts of which source went where. It lets captions made
-    for the ORIGINAL video be mapped onto this cut version later (see /api/clips/{id}/cut-manifest)."""
+def write_cut_manifest(video_path: str, clips: list[Clip], pieces: list[Piece], manifest_dir: str) -> None:
+    """Which parts of which source went where in an exported video. It lets captions made for the ORIGINAL video be
+    mapped onto this cut version later (see /api/clips/{id}/cut-manifest)."""
     by_id = {c.id: c for c in clips}
     sources: dict[str, dict] = {}
     for p in pieces:
@@ -222,7 +227,9 @@ def write_cut_manifest(video_path: str, clips: list[Clip], pieces: list[Piece]) 
         src = sources.setdefault(c.id, {"name": os.path.basename(c.path), "path": c.path, "role": c.role,
                                         "duration": c.duration, "pieces": []})
         src["pieces"].append({"src_start": p.src_start, "src_end": p.src_end, "out_start": p.out_start})
-    Path(manifest_path(video_path)).write_text(json.dumps({"version": 1, "video": os.path.basename(video_path),
+    os.makedirs(manifest_dir, exist_ok=True)
+    Path(manifest_path(video_path, manifest_dir)).write_text(json.dumps({"version": 1, "video": os.path.basename(video_path),
+                                                           "bytes": os.path.getsize(video_path),
                                                            "sources": list(sources.values())}, ensure_ascii=False, indent=1),
                                                encoding="utf-8")
 
@@ -233,6 +240,16 @@ def _workdir(preset: Preset, project: Project, rendered) -> str:
                                     encoding="utf-8")
     shutil.copytree(FONTS_SRC, Path(wd, "fonts"))
     return wd
+
+
+def _output_stem(project: Project, preset_name: str, suffix: str, name: str | None) -> str:
+    """The file name (no extension): the name the caller gave (an episode's title), else the one typed in the Export panel,
+    else the first MAIN clip's name + preset (an intro clip's name would be wrong for the whole file)."""
+    given = name or project.export.filename
+    if given and given.strip():
+        return safe_stem(given, 120, "export")
+    main = next((c for c in project.clips if c.role == "main"), project.clips[0])
+    return f"{_safe_stem(main.path)}_{preset_name}{suffix}"
 
 
 def _safe_stem(path: str) -> str:
@@ -270,13 +287,14 @@ def _unique_paths(out_dir: str, stem: str, ext: str) -> tuple[str, str]:
 
 
 def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=None, *, selection: Selection | None = None,
-               intro_ids: list[str] | None = None, name_suffix: str = "", max_video_kbps: int | None = None) -> ExportResult:
+               intro_ids: list[str] | None = None, name_suffix: str = "", max_video_kbps: int | None = None,
+               manifest_dir: str | None = None, name: str | None = None, with_extras: bool = True) -> ExportResult:
     """`selection`/`intro_ids`/`name_suffix`/`max_video_kbps` let the episode splitter render one episode:
     its own range, its own intro clip, its own file name and a bitrate cap that keeps it under the size limit."""
     if not project.clips:
         raise ExportError("no_clips", "No clips in the project. Please add a clip first")
     selection = selection or project.selection or Selection(0.0, edited_duration(project.clips))
-    preset, pieces, rendered = _prepare(project, selection, intro_ids=intro_ids)
+    preset, pieces, rendered = _prepare(project, selection, with_extras=with_extras, intro_ids=intro_ids)
     pieces, frames = _plan(pieces)
     if not pieces:
         raise ExportError("selection_invalid", "The selection is too short. Please choose a longer range")
@@ -319,10 +337,14 @@ def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=No
             _ffmpeg(final, total, lambda f, m="": report(0.8 + 0.2 * f, m), cancel_event, wd)
         os.makedirs(out_dir, exist_ok=True)
         with _name_lock:
-            video, srt = _unique_paths(out_dir, f"{_safe_stem(project.clips[0].path)}_{preset.name}{name_suffix}", ext)
+            video, srt = _unique_paths(out_dir, _output_stem(project, preset.name, name_suffix, name), ext)
             shutil.move(os.path.join(wd, out_name), video)
-            Path(srt).write_text(to_srt(rendered), encoding="utf-8")
-            write_cut_manifest(video, project.clips, pieces)
+            if rendered:
+                Path(srt).write_text(to_srt(rendered), encoding="utf-8")
+            else:
+                srt = None
+            if manifest_dir:
+                write_cut_manifest(video, project.clips, pieces, manifest_dir)
         return ExportResult(video, srt)
     finally:
         shutil.rmtree(wd, ignore_errors=True)
