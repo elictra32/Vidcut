@@ -10,6 +10,7 @@ BUDGET_SHARE = 0.92   # aim below the limit: the encoder's real size wanders a f
 FLOOR_SHARE = 0.7     # never plan a bitrate below this share of the source's, so the picture stays clear
 SNAP_WINDOW = 0.04    # a cut may move this share of an episode earlier to land on a dead-air cut
 MIN_CONTENT_S = 30.0
+MIN_CLIP_KBPS = 300   # below this a picture is not worth keeping
 
 
 @dataclass
@@ -36,6 +37,18 @@ def quality_range(preset: str, source_kbps: float | None) -> tuple[int, int]:
     else:
         floor = round(cap * 0.4)
     return min(floor, cap), cap
+
+
+def clip_video_kbps(max_bytes: float, duration: float, *, source_kbps: float | None, preset: str, container: str = "mp4") -> int:
+    """Bitrate cap that keeps ONE clip of `duration` seconds under `max_bytes` (same budget rules as an episode).
+    Raises ValueError("clip_limit_too_small") when the picture would have to drop below a watchable bitrate."""
+    audio = AUDIO_KBPS.get(container, 160)
+    _, cap = quality_range(preset, source_kbps)
+    budget = max_bytes * BUDGET_SHARE / CONTAINER_OVERHEAD * 8 / 1000
+    kbps = int(min(cap, budget / max(duration, 0.1) - audio))
+    if kbps < MIN_CLIP_KBPS:
+        raise ValueError("clip_limit_too_small")
+    return kbps
 
 
 def plan_episodes(boundaries: list[float], start: float, end: float, *, max_bytes: float, source_kbps: float | None,

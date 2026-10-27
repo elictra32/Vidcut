@@ -194,3 +194,5 @@ button.danger { color: #ff8a8a; }
 .hl-row .hl-pick, .hl-all { margin-right: 6px; }
 
 .vertical-only[hidden], label.field[hidden] { display: none; }
+
+#btn-export-highlights { margin-top: 4px; }

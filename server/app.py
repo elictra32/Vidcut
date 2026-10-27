@@ -28,7 +28,7 @@ from core.align import align as align_audio
 from core.cover import CoverError, render_cover, safe_stem, thai_date
 from core.vcover import DEFAULT_OUTRO_TEXT, render_vertical_cover
 from core.cutmap import pieces_from_dicts
-from core.episodes import plan_episodes
+from core.episodes import clip_video_kbps, plan_episodes
 from core.export import export_duration, manifest_path, render_preview_frame, run_export
 from core.fonts import FONT_FILES
 from core.media import FFmpegError, is_browser_playable, make_proxy, probe
@@ -697,9 +697,32 @@ def create_app(home: str | None = None) -> FastAPI:
         return {"files": files, "dir": out_dir, "limit_mb": max_mb,
                 "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
 
-    def run_highlight_set(snap: Project, ranges: list[dict], with_extras: bool, progress, cancel) -> dict:
+    def highlight_caps(snap: Project, ranges: list[dict], with_extras: bool, max_mb) -> list[int | None]:
+        """Bitrate cap per highlight so that each file stays under `max_mb` (None = no limit)."""
+        if not max_mb:
+            return [None] * len(ranges)
+        max_mb = float(max_mb)
+        if max_mb < 1:
+            raise AppError("clip_limit_too_small", "The size limit is too small", "Use at least 1 MB per clip")
+
+        def length(c):
+            return sum(k.end - k.start for k in enabled_keeps(c))
+        extras = (max((length(c) for c in snap.clips if c.role == "intro"), default=0.0)
+                  + sum(length(c) for c in snap.clips if c.role == "outro")) if with_extras else 0.0
+        src, container = source_video_kbps(snap.clips), _normalized(snap.export).container
+        try:
+            return [clip_video_kbps(max_mb * 1048576, r["end"] - r["start"] + extras, source_kbps=src, preset=snap.preset, container=container)
+                    for r in ranges]
+        except ValueError as e:
+            raise AppError("clip_limit_too_small", "The size limit is too small for the longest clip",
+                           "Raise the limit, or pick shorter highlights") from e
+
+    def run_highlight_set(snap: Project, ranges: list[dict], with_extras: bool, progress, cancel, max_mb=None) -> dict:
         """One finished file per picked highlight, each cut from the same edit with the same style."""
         out_dir = snap.export.out_dir or st.exports
+        caps = highlight_caps(snap, ranges, with_extras, max_mb)
+        if max_mb:
+            snap.export.quality = "auto"   # constant quality, capped per clip so each stays under the limit
         total = sum(r["end"] - r["start"] for r in ranges)
         given = (snap.export.filename or "").strip()
         files, done = [], 0.0
@@ -710,9 +733,10 @@ def create_app(home: str | None = None) -> FastAPI:
                 progress(base + span * f, f"Highlight {i}/{len(ranges)} · {m}" if m else f"Highlight {i}/{len(ranges)}")
             label = re.sub(r"[^A-Za-z0-9]+", "", r.get("label") or "")
             res = run_export(snap, out_dir, report, cancel, selection=Selection(r["start"], r["end"]),
-                             intro_ids=None if with_extras else [], with_extras=with_extras, manifest_dir=st.manifests,
+                             intro_ids=None if with_extras else [], with_extras=with_extras, manifest_dir=st.manifests, max_video_kbps=caps[i - 1],
                              name_suffix=f"_HL{i:02d}{('_' + label) if label else ''}", name=f"{given}_HL{i:02d}" if given else None)
-            files.append({"video": os.path.basename(res.video), "bytes": os.path.getsize(res.video)})
+            size = os.path.getsize(res.video)
+            files.append({"video": os.path.basename(res.video), "bytes": size, "over_limit": bool(max_mb) and size > float(max_mb) * 1048576})
             done += r["end"] - r["start"]
         return {"files": files, "dir": out_dir, "kind": "highlights",
                 "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
@@ -743,7 +767,8 @@ def create_app(home: str | None = None) -> FastAPI:
 
     def queue_highlights(project_dict: dict, params: dict, progress, cancel) -> dict:
         snap = project_from_dict(project_dict)
-        return run_highlight_set(snap, clean_ranges(snap, params.get("ranges")), bool(params.get("with_extras", False)), progress, cancel)
+        return run_highlight_set(snap, clean_ranges(snap, params.get("ranges")), bool(params.get("with_extras", False)), progress, cancel,
+                                 params.get("max_mb"))
 
     st.queue = JobQueue(st.home, {"export": queue_export, "episodes": queue_episodes, "highlights": queue_highlights},
                         busy=lambda: st.jobs.active(ignore=("proxy",)) > 0)
@@ -784,6 +809,7 @@ def create_app(home: str | None = None) -> FastAPI:
             label = f"Export · {describe(snap)}"
         elif kind == "highlights":
             params["ranges"] = clean_ranges(snap, params.get("ranges"))   # validates now, and drops anything outside the timeline
+            highlight_caps(snap, params["ranges"], bool(params.get("with_extras", False)), params.get("max_mb"))
             label = f"{len(params['ranges'])} highlight clips · {describe(snap).split(' · ')[0]}"
         else:
             prepare_episodes(copy.deepcopy(snap), float(params.get("max_mb", 500)), params.get("intro_ids"), params.get("measured_kbps"))  # validates now

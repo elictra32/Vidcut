@@ -94,3 +94,12 @@ def test_sample_windows_spread_evenly_and_shrink_for_short_ranges():
     assert sample_windows(100, 105) == [(100, 105)]
     assert sample_windows(0, 20) == [(0, 8), (12, 20)]
     assert sample_windows(5, 5) == []
+
+
+def test_one_clip_limit_gives_a_bitrate_that_fits_or_says_it_cannot():
+    import pytest
+    from core.episodes import clip_video_kbps
+    kbps = clip_video_kbps(50 * 1048576, 60, source_kbps=8000, preset="tiktok")
+    assert 300 <= kbps <= 8000 and (kbps + 160) * 1000 / 8 * 60 < 50 * 1048576
+    with pytest.raises(ValueError):
+        clip_video_kbps(1 * 1048576, 600, source_kbps=8000, preset="tiktok")

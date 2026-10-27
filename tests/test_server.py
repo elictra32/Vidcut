@@ -896,6 +896,20 @@ def test_several_highlights_export_as_separate_files_in_one_queue_item(client, t
     assert durs[0] == pytest.approx(2.0, abs=0.3) and durs[1] == pytest.approx(3.0, abs=0.3) and durs[2] == pytest.approx(1.0, abs=0.3)
 
 
+def test_highlight_clips_can_be_capped_to_a_size_like_episodes(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "m.mp4"), [("tone", 10)], size="320x180"))
+    out = str(tmp_path / "mout")
+    client.post("/api/export-folder", json={"path": out})
+    ranges = [{"start": 0, "end": 4, "label": "A"}, {"start": 4, "end": 10, "label": "B"}]
+    tiny = client.post("/api/queue", json={"kind": "highlights", "params": {"ranges": ranges, "max_mb": 0.01}}).json()
+    assert tiny["error"]["code"] == "clip_limit_too_small"             # refused when queued, not when its turn comes
+    item = client.post("/api/queue", json={"kind": "highlights", "params": {"ranges": ranges, "max_mb": 5}}).json()
+    q = wait_queue(client, lambda q: q["items"] and q["items"][0]["state"] in ("done", "error"))
+    it = q["items"][0]
+    assert it["state"] == "done" and item["id"] == it["id"], it
+    assert all(f["bytes"] <= 5 * 1048576 and f["over_limit"] is False for f in it["result"]["files"])
+
+
 def test_queue_validates_when_adding_not_when_running(client, tmp_path):
     assert client.post("/api/queue", json={"kind": "export"}).json()["error"]["code"] == "no_clips"
     add_clip(client, make_clip(str(tmp_path / "v.mp4"), [("tone", 4)], size="320x180"))

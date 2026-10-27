@@ -50,11 +50,16 @@ export function initHighlights() {
   const checkedRows = () => [...results.querySelectorAll(".hl-pick:checked")].map((b) => b.closest(".hl-row"));
   const reelBtn = el("button", { id: "btn-make-reel", class: "primary", hidden: true, onclick: () => makeReel(checkedRows().map((r) => ({ start: +r.dataset.start, end: +r.dataset.end }))) });
   const withExtras = el("input", { type: "checkbox", id: "hl-extras" });
+  const maxMb = el("input", { type: "number", id: "hl-max-mb", min: 1, step: 1, class: "num", placeholder: "no limit", value: recall("vidcut.hlMaxMb", ""), "aria-label": "Largest size of each clip in megabytes" });
+  maxMb.addEventListener("change", () => remember("vidcut.hlMaxMb", maxMb.value));
   const exportBtn = el("button", { id: "btn-export-highlights", hidden: true, title: "Each checked highlight becomes its own video file; they run one after another in the queue", onclick: async () => {
     const ranges = checkedRows().map((r) => ({ start: +r.dataset.start, end: +r.dataset.end, label: r.dataset.cat }));
-    if (ranges.length) await addToQueue("highlights", { ranges, with_extras: withExtras.checked });
+    if (ranges.length) await addToQueue("highlights", { ranges, with_extras: withExtras.checked, max_mb: maxMb.value ? +maxMb.value : null });
   } });
-  const exportBox = el("div", { class: "row", hidden: true }, el("label", { class: "row small" }, withExtras, el("span", {}, "Add the intro/outro clips to each")), exportBtn);
+  const exportBox = el("div", { hidden: true },
+    el("label", { class: "row small" }, withExtras, el("span", {}, "Add the intro/outro clips to each")),
+    el("label", { class: "row small" }, el("span", {}, "Largest size per clip (MB)"), maxMb),
+    exportBtn);
   const count = () => {
     const n = results.querySelectorAll(".hl-pick:checked").length;
     const any = results.querySelector(".hl-pick") !== null;
