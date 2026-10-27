@@ -326,3 +326,20 @@ def test_auto_quality_export_of_easy_footage_is_far_below_the_cap(tmp_path):
     res = run_export(proj, str(tmp_path / "out"))
     kbps = os.path.getsize(res.video) * 8 / 6 / 1000
     assert kbps < video_kbps(ExportSettings(quality="auto"), "tiktok", 6) * 0.5
+
+
+@pytest.mark.skipif(not has_libass(), reason="ffmpeg without libass")
+def test_reveal_changes_what_the_exported_frame_shows_over_time(tmp_path):
+    from core.models import SubtitleStyle
+    path = make_clip(str(tmp_path / "r.mp4"), [("tone", 4)], size="640x360")
+    sub = Subtitle("s1", "c1", 0.0, 4.0, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    style = SubtitleStyle(reveal=True)
+    proj = Project(clips=[Clip("c1", path, 4, 640, 360, 25, True, keeps=[Keep(0, 4)])], subtitles=[sub], style=style)
+    early, late = str(tmp_path / "e.png"), str(tmp_path / "l.png")
+    render_preview_frame(proj, 0.2, early)
+    render_preview_frame(proj, 3.8, late)
+    plain = Project(clips=proj.clips, subtitles=[sub], style=SubtitleStyle(reveal=False))
+    full = str(tmp_path / "f.png")
+    render_preview_frame(plain, 3.8, full)
+    assert open(early, "rb").read() != open(late, "rb").read()   # the early frame shows less text
+    assert open(late, "rb").read() == open(full, "rb").read()     # by the end the line equals the non-reveal rendering

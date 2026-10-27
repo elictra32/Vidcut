@@ -4,7 +4,8 @@
 import { getPresets, getProject, setSelectedSub, subscribe, ui, update } from "./state.js";
 import * as player from "./player.js";
 import * as tm from "./timeline_math.js";
-import { $ } from "./util.js";
+import { revealedCount } from "./reveal.js";
+import { $, el } from "./util.js";
 
 const stage = $("#stage");
 const frame = $("#frame");
@@ -46,7 +47,7 @@ function cropOverflow(clip, pr) {
 }
 const cropAxis = (clip, pr) => cropOverflow(clip, pr) > 1;
 
-function style(node, sub, st, scale) {
+function style(node, sub, st, scale, span, t) {
   const box = st.bg_color != null;
   Object.assign(node.style, {
     left: `${(sub.x ?? st.default_x) * 100}%`,
@@ -60,7 +61,15 @@ function style(node, sub, st, scale) {
     background: box ? st.bg_color : "transparent",
     padding: box ? `${Math.max(2, st.outline_width * scale)}px ${Math.max(4, st.outline_width * 2 * scale)}px` : "0",
   });
-  node.textContent = sub.text;
+  if (st.reveal && span) {
+    // the unspoken rest stays in the text (invisible) so the line keeps the position it will have when complete
+    const chars = Array.from(sub.text), n = revealedCount(sub.text, span[0], span[1], t);
+    const hidden = el("span", {}, chars.slice(n).join(""));
+    hidden.style.visibility = "hidden";
+    node.replaceChildren(chars.slice(0, n).join(""), hidden);
+  } else {
+    node.textContent = sub.text;
+  }
   node.classList.toggle("selected", sub.id === ui.selectedSubId);
 }
 
@@ -69,8 +78,10 @@ function render() {
   if (!p || !frame.clientWidth) return;
   const t = player.getTime();
   const scale = frame.clientWidth / preset().width;
+  const spans = new Map();
   const active = p.subtitles.filter((s) => {
     const span = tm.subtitleEditedSpan(p.clips, s);
+    if (span) spans.set(s.id, span);
     return span && t >= span[0] - 1e-6 && t < span[1];
   });
   const keep = new Set(active.map((s) => s.id));
@@ -97,7 +108,7 @@ function render() {
       overlay.append(node);
       nodes.set(sub.id, node);
     }
-    style(node, sub, p.style, scale);
+    style(node, sub, p.style, scale, spans.get(sub.id), t);
   }
 }
 

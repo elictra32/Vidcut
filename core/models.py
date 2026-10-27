@@ -61,6 +61,7 @@ class SubtitleStyle:
     default_x: float = 0.5
     default_y: float = 0.78
     align: str = "center"
+    reveal: bool = False  # text appears as it is spoken
 
 
 @dataclass

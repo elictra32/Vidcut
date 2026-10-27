@@ -113,6 +113,20 @@ try {
   await page.click("text=Export video");
   await page.waitForSelector(".export-result:has-text('picked-folder')", { timeout: 120000 });
   must(existsSync(join(pickedDir, "demo_tiktok.mkv")) && existsSync(join(pickedDir, "demo_tiktok.srt")), "the MKV and .srt were written to the chosen folder");
+  // reveal: the preview shows only the spoken part of a line, and the rest keeps its place
+  await page.check("#opt-reveal");
+  await page.evaluate(async () => {
+    const st = await import("/state.js");
+    const sub = st.getProject().subtitles[0];
+    const tm = await import("/timeline_math.js");
+    const span = tm.subtitleEditedSpan(st.getProject().clips, sub);
+    await (await import("/player.js")).seek(span[0] + 0.01);
+  });
+  await page.waitForFunction(() => document.querySelector("#sub-overlay .sub span"), null, { timeout: 5000 });
+  const parts = await page.$eval("#sub-overlay .sub", (n) => ({ shown: n.firstChild.textContent, hidden: n.querySelector("span").textContent, vis: getComputedStyle(n.querySelector("span")).visibility }));
+  must(parts.vis === "hidden" && parts.hidden.length > 0 && parts.shown.length > 0, `reveal shows the start of the line and hides the rest (${parts.shown}|${parts.hidden})`);
+  await page.uncheck("#opt-reveal");
+
   // delete every subtitle at once
   await page.click("#btn-delete-all-subs");
   await page.waitForSelector(".sub-list .sub-row", { state: "detached", timeout: 5000 });

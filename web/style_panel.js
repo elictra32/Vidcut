@@ -31,6 +31,9 @@ export function initStylePanel() {
     const bg = el("input", { type: "color" });
     bg.addEventListener("input", () => bgOn.checked && set("bg_color", bg.value));
     refs.bg_color = { input: bg };
+    const revealOn = el("input", { type: "checkbox", id: "opt-reveal" });
+    revealOn.addEventListener("change", () => set("reveal", revealOn.checked));
+    refs.revealOn = { input: revealOn };
     const reset = el("button", { class: "ghost", onclick: () => update((p) => p.subtitles.forEach((s) => (s.x = s.y = s.scale = null)), "subs-pos") },
       "Reset all subtitle positions");
     root.replaceChildren(
@@ -43,6 +46,8 @@ export function initStylePanel() {
       el("label", { class: "field inline" }, el("span", {}, "Box background"), bgOn, bg),
       slider("default_x", "Horizontal position", 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`),
       slider("default_y", "Vertical position", 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`),
+      el("label", { class: "field inline", title: "Each line fills in piece by piece over the time it is on screen" },
+        el("span", {}, "Reveal text as it's spoken"), revealOn),
       el("p", { class: "muted small" }, "Drag a subtitle on the preview to move just that line (double-click to reset)"),
       reset);
     built = true;
@@ -54,10 +59,11 @@ export function initStylePanel() {
     if (!built) build();
     const st = p.style;
     for (const [k, r] of Object.entries(refs)) {
-      if (k === "bgOn" || k === "bg_color") continue;
+      if (k === "bgOn" || k === "bg_color" || k === "revealOn") continue;
       if (document.activeElement !== r.input) r.input.value = st[k];
       if (r.out) r.out.textContent = r.fmt(st[k]);
     }
+    refs.revealOn.input.checked = !!st.reveal;
     refs.bgOn.input.checked = st.bg_color != null;
     refs.bg_color.input.value = st.bg_color ?? "#000000";
   };

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from core.fonts import ass_size_factor
 from core.models import SubtitleStyle
+from core.reveal import reveal_schedule
 
 
 @dataclass
@@ -15,6 +16,7 @@ class RenderedSub:
     x: float | None
     y: float | None
     scale: float | None = None
+    reveal: bool = False  # text appears piece by piece over the line
 
 
 def _ass_color(hex_color: str, alpha: int = 0) -> str:
@@ -64,8 +66,15 @@ def to_ass(subs: list[RenderedSub], style: SubtitleStyle, play_res: tuple[int, i
         x = round((s.x if s.x is not None else style.default_x) * w)
         y = round((s.y if s.y is not None else style.default_y) * h)
         zoom = f"\\fscx{round(s.scale * 100)}\\fscy{round(s.scale * 100)}" if s.scale and abs(s.scale - 1) > 0.005 else ""
-        lines.append(f"Dialogue: 0,{_ass_time(s.start)},{_ass_time(s.end)},Default,,0,0,0,,"
-                     f"{{\\an5\\pos({x},{y}){zoom}}}{_escape(s.text)}")
+        head = f"{{\\an5\\pos({x},{y}){zoom}}}"
+        if s.reveal and s.end > s.start:
+            # one event per step: what is spoken so far is shown, the rest stays in the text but fully transparent,
+            # so the line keeps the position it will have when complete.
+            for t0, t1, shown in reveal_schedule(s.text, s.start, s.end):
+                body = _escape(s.text[:shown]) + (f"{{\\alpha&HFF&}}{_escape(s.text[shown:])}" if shown < len(s.text) else "")
+                lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},Default,,0,0,0,,{head}{body}")
+        else:
+            lines.append(f"Dialogue: 0,{_ass_time(s.start)},{_ass_time(s.end)},Default,,0,0,0,,{head}{_escape(s.text)}")
     return "\n".join(lines) + "\n"
 
 
