@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from core.cutmap import CutPiece
-from core.media import Cancelled, find_ffmpeg
+from core.media import Cancelled, find_ffmpeg, no_window
 
 RATE = 8000
 HOP_S = 0.05
@@ -36,7 +36,7 @@ class AlignResult:
 def decode(path: str, cancel=None) -> np.ndarray:
     ffmpeg, _ = find_ffmpeg()
     raw = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", path, "-vn", "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"],
-                         capture_output=True).stdout
+                         capture_output=True, **no_window()).stdout
     if cancel is not None and cancel.is_set():
         raise Cancelled()
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0

@@ -27,10 +27,19 @@ def find_ffmpeg() -> tuple[str, str]:
     return ff, fp
 
 
+CREATE_NO_WINDOW = 0x08000000
+
+
+def no_window() -> dict:
+    """subprocess options that stop Windows opening a console window for every ffmpeg/ffprobe call. Needed when Vidcut
+    runs without a console of its own (pythonw, see Vidcut.vbs): each call would otherwise flash a terminal."""
+    return {"creationflags": CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
 def probe(path: str) -> dict:
     _, ffprobe = find_ffmpeg()
     r = subprocess.run([ffprobe, "-v", "error", "-print_format", "json", "-show_streams",
-                        "-show_format", path], capture_output=True, text=True, encoding="utf-8")
+                        "-show_format", path], capture_output=True, text=True, encoding="utf-8", **no_window())
     if r.returncode != 0:
         raise FFmpegError("probe failed", r.stderr[-2000:])
     data = json.loads(r.stdout)
@@ -76,7 +85,7 @@ def run_ffmpeg(args: list[str], duration: float = 0.0, progress_cb=None, cancel_
     ffmpeg, _ = find_ffmpeg()
     cmd = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"] + args
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd,
-                            text=True, encoding="utf-8", errors="replace")
+                            text=True, encoding="utf-8", errors="replace", **no_window())
     err_chunks: list[str] = []
     t = threading.Thread(target=lambda: err_chunks.append(proc.stderr.read()), daemon=True)
     t.start()

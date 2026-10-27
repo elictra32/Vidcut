@@ -15,7 +15,7 @@ import numpy as np
 
 from core import media
 from core.fonts import FONT_FILES, FONTS_DIR, ass_size_factor, text_advance
-from core.media import Cancelled, FFmpegError, find_ffmpeg
+from core.media import Cancelled, FFmpegError, find_ffmpeg, no_window
 from core.names import safe_stem  # noqa: F401  (re-exported: the server imports it from here)
 
 W, H = 1920, 1080
@@ -131,7 +131,7 @@ def build_ass(p: Profile, title: str, date_text: str, title_font: str, date_font
 def _run(cmd: list[str], cancel=None, cwd: str | None = None) -> None:
     ffmpeg, _ = find_ffmpeg()
     try:
-        r = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", *cmd], capture_output=True, text=True, cwd=cwd)
+        r = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", *cmd], capture_output=True, text=True, cwd=cwd, **no_window())
     except FileNotFoundError as e:
         raise CoverError("ffmpeg_missing", "ffmpeg not found. Please run setup.bat again") from e
     if cancel is not None and cancel.is_set():
@@ -144,7 +144,7 @@ def _key_color(png: str, p: Profile) -> str:
     """The background colour around the badge: the median of the crop's border, as 0xRRGGBB."""
     ffmpeg, _ = find_ffmpeg()
     raw = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-i", png, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                         capture_output=True).stdout
+                         capture_output=True, **no_window()).stdout
     w, h = p.badge_crop[2], p.badge_crop[3]
     img = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 3)
     ring = np.concatenate([img[0], img[-1], img[:, 0], img[:, -1]])

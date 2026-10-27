@@ -3,7 +3,7 @@ import subprocess
 
 import numpy as np
 
-from core.media import find_ffmpeg, probe
+from core.media import find_ffmpeg, no_window, probe
 
 
 def waveform_peaks(path: str, n: int = 2000) -> list[float]:
@@ -11,7 +11,7 @@ def waveform_peaks(path: str, n: int = 2000) -> list[float]:
         return [0.0] * n
     ffmpeg, _ = find_ffmpeg()
     raw = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", path, "-vn", "-ac", "1",
-                          "-ar", "8000", "-f", "s16le", "-"], capture_output=True).stdout
+                          "-ar", "8000", "-f", "s16le", "-"], capture_output=True, **no_window()).stdout
     samples = np.abs(np.frombuffer(raw, dtype=np.int16).astype(np.float32)) / 32768.0
     if samples.size == 0:
         return [0.0] * n
@@ -26,7 +26,7 @@ def loudness_by_second(path: str) -> list[float]:
         return []
     ffmpeg, _ = find_ffmpeg()
     raw = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", path, "-vn", "-ac", "1",
-                          "-ar", "8000", "-f", "s16le", "-"], capture_output=True).stdout
+                          "-ar", "8000", "-f", "s16le", "-"], capture_output=True, **no_window()).stdout
     x = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
     n = x.size // 8000
     if n == 0:
