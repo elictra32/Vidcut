@@ -37,7 +37,7 @@ export function initCovers() {
     s.value = value;
     return s;
   };
-  const titleFont = fontSel("cover-title-font", "Montserrat"), dateFont = fontSel("cover-date-font", "Sarabun");
+  const titleFont = fontSel("cover-title-font", "Montserrat"), dateFont = fontSel("cover-date-font", "Prompt Light");
   const make = el("button", { id: "btn-make-covers", class: "primary" }, "Make covers");
 
   const fillTemplates = () => {

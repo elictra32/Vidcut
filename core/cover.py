@@ -26,6 +26,7 @@ class Profile:
     """Where things sit in the template, measured from the sample covers (pixels at 1920x1080, seconds)."""
     clean: tuple = (490, 692, 900, 180)        # x, y, w, h of the area holding the old texts
     title_center: tuple = (936.5, 735.5)
+    title_text_dy: float = 2.5                  # the letters sit a little lower in their box than the box centre
     title_color: str = "F5853E"
     title_px: float = 44.0                      # font em size
     box_h: int = 72                             # the black box behind the title
@@ -34,7 +35,7 @@ class Profile:
     title_spacing: float = 1.5                  # extra space between letters, as in the sample covers
     date_left: float = 806.0
     date_center_y: float = 829.5
-    date_px: float = 48.3
+    date_px: float = 44.7
     date_color: str = "FFFFFF"
     badge_crop: tuple = (632, 806, 154, 57)     # the LIVE badge as it sits in the template (x, y, w, h)
     badge_at: float = 2.55                      # a moment when it is fully shown
@@ -104,7 +105,7 @@ def build_ass(p: Profile, title: str, date_text: str, title_font: str, date_font
 
     # the finished cover shown at the very start
     ev("Box", 0, p.poster_until, f"\\an5\\pos({cx},{cy})\\1c&H000000&\\bord0\\shad0\\p1", box + "{\\p0}")
-    ev("Title", 0, p.poster_until, f"\\pos({cx},{cy})", t_text)
+    ev("Title", 0, p.poster_until, f"\\pos({cx},{cy + p.title_text_dy})", t_text)
     ev("Date", 0, p.poster_until, f"\\pos({p.date_left},{p.date_center_y})", d_text)
     # fade in while growing, then fade out
     for style, (a0, fin), (o0, fout), text, anchor in (
@@ -118,10 +119,10 @@ def build_ass(p: Profile, title: str, date_text: str, title_font: str, date_font
             x0 = sx + s0 * (p.date_left - sx)
             pos = f"\\move({x0:.1f},{p.date_center_y},{p.date_left},{p.date_center_y},0,{grow_ms})"
         else:
-            pos = f"\\pos({cx},{cy})"
+            pos = f"\\pos({cx},{cy + p.title_text_dy})"
         anim = f"\\fscx{s0p}\\fscy{s0p}\\t(0,{grow_ms},\\fscx100\\fscy100)\\fad({round(fin * 1000)},{round(fout * 1000)})"
         if style == "Title":
-            ev("Box", a0, end, f"\\an5{pos}\\1c&H000000&\\bord0\\shad0\\p1{anim}", box + "{\\p0}")
+            ev("Box", a0, end, f"\\an5\\pos({cx},{cy})\\1c&H000000&\\bord0\\shad0\\p1{anim}", box + "{\\p0}")
         ev(style, a0, end, pos + anim, text)
     return "\n".join(lines) + "\n"
 
@@ -161,7 +162,7 @@ def check_template(path: str, p: Profile = THUS) -> None:
 
 
 def render_cover(template: str, title: str, date_text: str, out_path: str, *, title_font: str = "Montserrat",
-                 date_font: str = "Sarabun", profile: Profile = THUS, cancel=None) -> str:
+                 date_font: str = "Prompt Light", profile: Profile = THUS, cancel=None) -> str:
     if not title.strip():
         raise CoverError("title_empty", "Type the episode title first")
     for f in (title_font, date_font):

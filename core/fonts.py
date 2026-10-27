@@ -14,8 +14,9 @@ FONTS_DIR = Path(__file__).resolve().parent.parent / "fonts"
 FONT_FILES = {
     "Sarabun": "Sarabun-Regular.ttf",
     "Prompt": "Prompt-Regular.ttf",
+    "Prompt Light": "Prompt-Light.ttf",  # the THUS brand Thai typeface (named in its logo manual)
     "Prompt Medium": "Prompt-Medium.ttf",
-    "Montserrat": "Montserrat-Regular.ttf",  # the THUS brand typeface (static Regular/Medium cut from the variable font)
+    "Montserrat": "Montserrat-Regular.ttf",  # the THUS brand typeface (official static Regular/Medium from Google Fonts)
     "Montserrat Medium": "Montserrat-Medium.ttf",
 }
 
