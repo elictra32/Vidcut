@@ -8,6 +8,7 @@ import re
 import uuid
 from dataclasses import dataclass
 
+from core.cutmap import CutPiece, map_window
 from core.models import Clip, Selection, Subtitle
 from core.presets import Preset
 from core.srt import Cue
@@ -87,12 +88,17 @@ def effective_windows(cues: list[Cue]) -> list[Window]:
 
 
 def cues_to_subtitles(clips: list[Clip], clip_id: str, cues: list[Cue], preset: Preset, offset: float = 0.0,
-                      selection: Selection | None = None) -> list[Subtitle]:
+                      selection: Selection | None = None, cutmap: list[CutPiece] | None = None) -> list[Subtitle]:
     """Subtitles anchored to `clip_id`'s source time. With `selection`, only cues inside the source
     ranges the selection covers (a selection spanning cuts covers several ranges)."""
     clip = next(c for c in clips if c.id == clip_id)
     windows = []
     for w in effective_windows([Cue(c.start + offset, c.end + offset, c.text) for c in cues]):
+        if cutmap is not None:  # the clip is a cut version of the video the captions were made for
+            mapped = map_window(cutmap, w.start, w.end)
+            if mapped is None:
+                continue
+            w = Window(mapped[0], mapped[1], w.text)
         start, end = max(0.0, w.start), min(clip.duration, w.end)
         if end - start > 0.01:
             windows.append(Window(start, end, w.text))

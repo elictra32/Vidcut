@@ -686,3 +686,83 @@ def test_highlights_find_the_scolding_part_and_export_a_transcript(client, tmp_p
     assert scold and scold[0]["start"] <= 24 and scold[0]["end"] >= 30 and "scold" in r["lexicon"]
     t = client.get("/api/highlights/transcript").json()
     assert t["lines"] == len(texts) and "[00:24]" in t["text"]
+
+
+# ---- captions for an original video, applied to its cut version ------------------------------------------------
+def test_export_writes_a_manifest_next_to_the_video(client, tmp_path):
+    from core.export import manifest_path
+    add_clip(client, make_clip(str(tmp_path / "m.mp4"), [("tone", 4)], size="320x180"))
+    out = str(tmp_path / "o")
+    client.post("/api/export-folder", json={"path": out})
+    put_project(client, selection={"start": 1, "end": 3})
+    j = wait_job(client, client.post("/api/export").json()["job"], timeout=120)
+    assert j["state"] == "done"
+    mf = json.loads(open(manifest_path(os.path.join(out, j["result"]["video"])), encoding="utf-8").read())
+    assert mf["version"] == 1 and mf["sources"][0]["name"] == "m.mp4" and mf["sources"][0]["role"] == "main"
+    piece = mf["sources"][0]["pieces"][0]
+    assert piece["src_start"] == pytest.approx(1.0, abs=0.05) and piece["out_start"] == 0.0
+    assert piece["src_end"] == pytest.approx(3.0, abs=0.1)
+
+
+def test_cut_manifest_endpoint_finds_the_file_next_to_the_clip(client, tmp_path):
+    path = make_clip(str(tmp_path / "cutvideo.mp4"), [("tone", 5)], size="320x180")
+    cid = add_clip(client, path)["clip"]["id"]
+    assert client.get(f"/api/clips/{cid}/cut-manifest").json() == {"found": False}
+    (tmp_path / "cutvideo.vidcut.json").write_text(json.dumps({"version": 1, "video": "cutvideo.mp4", "sources": [
+        {"name": "intro.mp4", "role": "intro", "pieces": [{"src_start": 0, "src_end": 2, "out_start": 0}]},
+        {"name": "orig.mp4", "role": "main", "pieces": [{"src_start": 100, "src_end": 103, "out_start": 2}]}]}), encoding="utf-8")
+    r = client.get(f"/api/clips/{cid}/cut-manifest").json()
+    assert r["found"] and r["sources"][0]["name"] == "orig.mp4"  # the main source comes first
+    (tmp_path / "cutvideo.vidcut.json").write_text("{not json", encoding="utf-8")
+    assert client.get(f"/api/clips/{cid}/cut-manifest").json()["found"] is False
+
+
+def test_import_srt_through_a_cut_map_moves_cues_onto_the_cut_clip(client, tmp_path):
+    cid = add_clip(client, make_clip(str(tmp_path / "cut.mp4"), [("tone", 20)], size="320x180"))["clip"]["id"]
+    srt = ("1\n00:01:40,500 --> 00:01:43,000\nสวัสดีครับทุกคน\n\n2\n00:03:00,000 --> 00:03:02,000\nนี่อยู่ในช่วงที่ถูกตัดออก\n\n"
+           "3\n00:02:00,000 --> 00:02:03,000\nวันนี้เรามาตัดต่อ\n")
+    pieces = [{"src_start": 100.0, "src_end": 110.0, "out_start": 0.0}, {"src_start": 120.0, "src_end": 130.0, "out_start": 10.0}]
+    r = client.post("/api/subtitles/import-srt", json={"clip_id": cid, "srt_text": srt, "only_selection": False, "pieces": pieces})
+    assert r.status_code == 200, r.text
+    subs = get_project(client)["subtitles"]
+    text = "".join(s["text"].replace("\n", "") for s in subs)
+    assert "สวัสดีครับทุกคน" in text and "วันนี้เรามาตัดต่อ" in text and "ถูกตัดออก" not in text
+    first = min(subs, key=lambda s: s["src_start"])
+    assert first["src_start"] == pytest.approx(0.5, abs=0.3)
+    last = max(subs, key=lambda s: s["src_start"])
+    assert last["src_start"] == pytest.approx(10.0, abs=0.3)
+
+
+def test_align_endpoint_recovers_the_cut_map_from_audio(client, tmp_path, monkeypatch):
+    import subprocess
+    import numpy as np
+    from tests.test_align import cut_of, speechlike, write_wav
+    orig_audio = speechlike(100, 11)
+    ranges = [(10.0, 40.0), (55.0, 90.0)]
+    write_wav(tmp_path / "o.wav", orig_audio)
+    write_wav(tmp_path / "c.wav", cut_of(orig_audio, ranges))
+
+    def video(wav, out, secs):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"color=c=black:s=160x90:r=10:d={secs}", "-i", str(wav),
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(out)], check=True)
+    video(tmp_path / "o.wav", tmp_path / "orig.mp4", 100)
+    video(tmp_path / "c.wav", tmp_path / "cutv.mp4", 65)
+    cid = add_clip(client, str(tmp_path / "cutv.mp4"))["clip"]["id"]
+    j = wait_job(client, client.post(f"/api/clips/{cid}/align", json={"original_path": str(tmp_path / "orig.mp4")}).json()["job"])
+    assert j["state"] == "done", j
+    ps = j["result"]["pieces"]
+    assert len(ps) == 2 and ps[0]["src_start"] == pytest.approx(10.0, abs=0.3) and ps[1]["src_start"] == pytest.approx(55.0, abs=0.3)
+    assert ps[1]["out_start"] == pytest.approx(30.0, abs=0.3) and j["result"]["coverage"] > 0.9
+
+
+def test_align_with_an_unrelated_original_is_a_clear_error(client, tmp_path):
+    import subprocess
+    from tests.test_align import speechlike, write_wav
+    write_wav(tmp_path / "a.wav", speechlike(40, 21))
+    write_wav(tmp_path / "b.wav", speechlike(60, 22))
+    for n, secs in (("a", 40), ("b", 60)):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"color=c=black:s=160x90:r=10:d={secs}", "-i", str(tmp_path / f"{n}.wav"),
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(tmp_path / f"{n}.mp4")], check=True)
+    cid = add_clip(client, str(tmp_path / "a.mp4"))["clip"]["id"]
+    j = wait_job(client, client.post(f"/api/clips/{cid}/align", json={"original_path": str(tmp_path / "b.mp4")}).json()["job"])
+    assert j["state"] == "error" and j["error"]["code"] == "align_failed"

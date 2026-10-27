@@ -34,9 +34,11 @@ try {
   must(saved && saved.start <= 30 && saved.end >= 41, `Use as In/Out saved the range ${JSON.stringify(saved)}`);
 
   await page.click("#btn-copy-transcript");
-  await page.waitForSelector(".toast", { timeout: 5000 });
-  const clip_text = await page.evaluate(() => navigator.clipboard.readText());
-  must(/MM:SS-MM:SS/.test(clip_text) && /\[00:30\]/.test(clip_text), "the transcript with instructions is copied");
+  await page.waitForSelector(".toast:has-text('Copied'), .toast:has-text('downloaded')", { timeout: 5000 });
+  const toast = await page.$eval(".toast:has-text('Copied'), .toast:has-text('downloaded')", (e) => e.textContent);
+  must(/Copied \d+ lines|downloaded as a text file/.test(toast), "the transcript is copied (or downloaded when the clipboard is blocked): " + toast.slice(0, 40));
+  const r = await (await fetch(`${app.base}/api/highlights/transcript`)).json();
+  must(/MM:SS-MM:SS/.test(r.text) && /\[00:30\]/.test(r.text), "the transcript carries the instructions and timestamps");
 
   await page.fill("#hl-answer", "05:00-05:40 | wisdom | คม\nnot a range\n00:10-00:50 | funny | ขำ");
   await page.click("#btn-read-picks");

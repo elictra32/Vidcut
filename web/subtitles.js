@@ -39,21 +39,59 @@ function openImportDialog(fileName, srtText) {
   clipSel.value = p.clips.some((c) => c.id === ui.currentClipId) ? ui.currentClipId : p.clips[0].id;
   const onlySel = el("input", { type: "checkbox", checked: !!p.selection, disabled: !p.selection });
   const offset = el("input", { type: "number", value: 0, step: 0.1 });
+  // The captions may belong to the ORIGINAL video while this clip is its cut version: map the times through the cuts.
+  let pieces = null;
+  const mode = el("select", { id: "srt-mode" },
+    el("option", { value: "same" }, "Made for this exact video"),
+    el("option", { value: "cut" }, "Made for the video BEFORE dead air was cut (this clip is the cut version)"));
+  const cutStatus = el("p", { class: "muted small", id: "srt-cut-status" });
+  const pickOriginal = el("button", { id: "btn-pick-original", onclick: async () => {
+    try {
+      const { path } = await api("POST", "/api/pick-original");
+      if (!path) return;
+      const { job } = await withSavedProject(() => api("POST", `/api/clips/${clipSel.value}/align`, { original_path: path }));
+      const done = await trackJob("Matching the sound to the original", job);
+      if (!done) return;
+      pieces = done.result.pieces;
+      cutStatus.textContent = `Matched ${Math.round(done.result.coverage * 100)}% of this video to the original (${pieces.length} part${pieces.length === 1 ? "" : "s"}).`;
+    } catch (e) { showError(e); }
+  } }, "Choose the original video…");
+  const cutBox = el("div", { class: "field", hidden: true }, cutStatus, pickOriginal);
+  const lookForManifest = async () => {
+    pieces = null;
+    cutStatus.textContent = "Looking for a Vidcut cut file next to this video…";
+    pickOriginal.hidden = false;
+    try {
+      const m = await api("GET", `/api/clips/${clipSel.value}/cut-manifest`);
+      if (m.found) {
+        pieces = m.sources[0].pieces;
+        cutStatus.textContent = `Found the Vidcut cut file next to this video (source: ${m.sources[0].name}). Times will be mapped exactly.`;
+        pickOriginal.hidden = true;
+      } else {
+        cutStatus.textContent = "No Vidcut cut file found. Choose the original video and Vidcut will find the matching parts by comparing the sound (takes a minute or two for a long video).";
+      }
+    } catch { cutStatus.textContent = "Choose the original video to match against."; }
+  };
+  mode.addEventListener("change", () => { cutBox.hidden = mode.value !== "cut"; if (mode.value === "cut") lookForManifest(); });
+  clipSel.addEventListener("change", () => mode.value === "cut" && lookForManifest());
   const dlg = el("dialog", { class: "frame-dialog import-dialog" },
     el("h3", {}, `Import subtitles from ${fileName}`),
-    el("p", { class: "muted small" }, "The caption file must come from the same video you added here (the original, before dead air was cut) for the times to match"),
+    el("p", { class: "muted small" }, "For the times to match, the caption file must belong to the video it is applied to, or to the original that this clip was cut from."),
     el("label", { class: "field" }, el("span", {}, "Apply subtitles to clip"), clipSel),
+    el("label", { class: "field" }, el("span", {}, "These captions were"), mode), cutBox,
     el("label", { class: "field inline" }, el("span", {}, p.selection ? "Only the selected In/Out range" : "Only the In/Out range (none selected)"), onlySel),
     el("label", { class: "field" }, el("span", {}, "Time shift (seconds): positive = subtitles appear later (use when they show before the voice) · negative = earlier (use when they show after the voice)"), offset),
     el("div", { class: "row" },
       el("button", { onclick: () => dlg.close() }, "Cancel"),
       el("button", { class: "primary", onclick: async () => {
         const clipId = clipSel.value;
+        if (mode.value === "cut" && !pieces) return showToast("Choose the original video first, so the times can be matched", "error", 6000);
         if (getProject().subtitles.some((x) => x.clip_id === clipId) && !confirm("This clip's existing subtitles will be replaced. Continue?")) return;
         dlg.close();
         try {
           const r = await withSavedProject(() => api("POST", "/api/subtitles/import-srt", {
-            clip_id: clipId, srt_text: srtText, offset: parseFloat(offset.value) || 0, only_selection: onlySel.checked }));
+            clip_id: clipId, srt_text: srtText, offset: parseFloat(offset.value) || 0, only_selection: onlySel.checked,
+            ...(mode.value === "cut" ? { pieces } : {}) }));
           await loadProject();
           showToast(`Imported ${r.count} subtitle lines`);
         } catch (e) {

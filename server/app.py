@@ -22,8 +22,10 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from core import media
 from core.autosub import generate_subtitles
 from core.encode import AUDIO_KBPS, _normalized, estimate_bytes, source_video_kbps, video_kbps
+from core.align import align as align_audio
+from core.cutmap import pieces_from_dicts
 from core.episodes import plan_episodes
-from core.export import export_duration, render_preview_frame, run_export
+from core.export import export_duration, manifest_path, render_preview_frame, run_export
 from core.fonts import FONT_FILES
 from core.media import FFmpegError, is_browser_playable, make_proxy, probe
 from core.models import ROLES, Clip, Keep, Overlay, Project, Selection, project_from_dict, project_to_dict
@@ -351,6 +353,45 @@ def create_app(home: str | None = None) -> FastAPI:
             raise AppError("no_subtitles", "There are no subtitles to export", "Generate or import subtitles first")
         return {"text": transcript_for_ai(lines), "lines": len(lines)}
 
+    # ---- captions made for the ORIGINAL video, but the clip here is a cut version of it ------------------------
+    @app.get("/api/clips/{clip_id}/cut-manifest")
+    def get_cut_manifest(clip_id: str):
+        """The .vidcut.json that Vidcut writes next to an export, if it is next to this clip."""
+        clip = st.clip(clip_id)
+        path = manifest_path(clip.path)
+        if not os.path.isfile(path):
+            return {"found": False}
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            sources = [{"name": s["name"], "role": s.get("role", "main"), "pieces": s["pieces"]} for s in data["sources"]]
+            pieces_from_dicts(sources[0]["pieces"] if sources else [])
+        except (OSError, ValueError, KeyError, TypeError, IndexError):
+            return {"found": False, "damaged": True}
+        sources.sort(key=lambda s: s["role"] != "main")
+        return {"found": True, "sources": sources}
+
+    @app.post("/api/pick-original")
+    def pick_original():
+        path = _pick_file()
+        return {"path": path}
+
+    @app.post("/api/clips/{clip_id}/align")
+    def post_align(clip_id: str, body: dict):
+        clip = st.clip(clip_id)
+        original = os.path.abspath(str(body.get("original_path", "")))
+        if not os.path.isfile(original):
+            raise AppError("file_missing", "File not found", "Check that the file is still in its original location", original, status=404)
+        cut_path = clip.path
+
+        def work(progress, cancel):
+            res = align_audio(cut_path, original, progress, cancel)
+            if not res.pieces:
+                raise AppError("align_failed", "Couldn't find this video's audio in the original",
+                               "Check that this is the cut version of that same video, with the original audio")
+            return {"pieces": [{"src_start": p.src_start, "src_end": p.src_end, "out_start": p.out_start} for p in res.pieces],
+                    "coverage": round(res.coverage, 3), "confidence": round(res.confidence, 3)}
+        return {"job": st.jobs.submit(work, "align")}
+
     # ---- subtitles from an SRT file (e.g. YouTube auto captions) -----------------------------
     @app.post("/api/subtitles/import-srt")
     def import_srt(body: dict):
@@ -366,8 +407,14 @@ def create_app(home: str | None = None) -> FastAPI:
         if only_selection and snap.selection is None:
             raise AppError("no_selection", "No range selected for the import",
                            "Set In/Out first, or import the whole file")
+        cutmap = None
+        if body.get("pieces"):
+            try:
+                cutmap = pieces_from_dicts(body["pieces"])
+            except (KeyError, TypeError, ValueError) as e:
+                raise AppError("cutmap_invalid", "The cut information is not valid", "Pick the cut file or the original video again") from e
         subs = cues_to_subtitles(snap.clips, clip_id, cues, PRESETS[snap.preset], offset,
-                                 snap.selection if only_selection else None)
+                                 snap.selection if only_selection else None, cutmap)
         if not subs:
             raise AppError("srt_no_match", "No subtitles match this clip's time range",
                            "Check that the same original file was uploaded to YouTube, try the time shift, or import the whole file")

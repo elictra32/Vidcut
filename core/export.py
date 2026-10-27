@@ -2,6 +2,7 @@
 sources), concat, per-clip framing, then libass subtitles. ffmpeg runs with cwd set to a temp
 work dir and references the ASS file, graph script and fonts by relative name, which avoids
 Windows path escaping inside filter strings."""
+import json
 import os
 import re
 import shutil
@@ -200,6 +201,28 @@ def _prepare(project: Project, selection: Selection, with_extras: bool = True, i
     return preset, pieces, rendered
 
 
+MANIFEST_SUFFIX = ".vidcut.json"
+
+
+def manifest_path(video_path: str) -> str:
+    return os.path.splitext(video_path)[0] + MANIFEST_SUFFIX
+
+
+def write_cut_manifest(video_path: str, clips: list[Clip], pieces: list[Piece]) -> None:
+    """A small file next to the exported video saying which parts of which source went where. It lets captions made
+    for the ORIGINAL video be mapped onto this cut version later (see /api/clips/{id}/cut-manifest)."""
+    by_id = {c.id: c for c in clips}
+    sources: dict[str, dict] = {}
+    for p in pieces:
+        c = by_id[p.clip_id]
+        src = sources.setdefault(c.id, {"name": os.path.basename(c.path), "path": c.path, "role": c.role,
+                                        "duration": c.duration, "pieces": []})
+        src["pieces"].append({"src_start": p.src_start, "src_end": p.src_end, "out_start": p.out_start})
+    Path(manifest_path(video_path)).write_text(json.dumps({"version": 1, "video": os.path.basename(video_path),
+                                                           "sources": list(sources.values())}, ensure_ascii=False, indent=1),
+                                               encoding="utf-8")
+
+
 def _workdir(preset: Preset, project: Project, rendered) -> str:
     wd = tempfile.mkdtemp(prefix="vidcut_")
     Path(wd, "subs.ass").write_text(to_ass(rendered, project.style, (preset.width, preset.height)),
@@ -295,6 +318,7 @@ def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=No
             video, srt = _unique_paths(out_dir, f"{_safe_stem(project.clips[0].path)}_{preset.name}{name_suffix}", ext)
             shutil.move(os.path.join(wd, out_name), video)
             Path(srt).write_text(to_srt(rendered), encoding="utf-8")
+            write_cut_manifest(video, project.clips, pieces)
         return ExportResult(video, srt)
     finally:
         shutil.rmtree(wd, ignore_errors=True)
