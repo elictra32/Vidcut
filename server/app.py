@@ -31,6 +31,7 @@ from core.cutmap import pieces_from_dicts
 from core.episodes import clip_video_kbps, plan_episodes
 from core.export import export_duration, manifest_path, render_preview_frame, run_export
 from core.fonts import FONT_FILES
+from core.grade import clamp as clamp_grade
 from core.media import FFmpegError, is_browser_playable, make_proxy, probe
 from core.models import ROLES, Clip, Keep, Overlay, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
@@ -205,6 +206,7 @@ def create_app(home: str | None = None) -> FastAPI:
                 known = current.get(c.id)
                 if known is not None:
                     known.keeps, known.framing = c.keeps, c.framing
+                    known.grade = clamp_grade(c.grade)
                     known.role = c.role if c.role in ROLES else "main"
                     known.cuts_confirmed = bool(c.cuts_confirmed)
                     clips.append(known)

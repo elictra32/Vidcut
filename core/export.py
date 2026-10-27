@@ -13,6 +13,7 @@ from pathlib import Path
 
 from core import media
 from core.ass import RenderedSub, to_ass, to_srt
+from core.grade import grade_filter
 from core.encode import encoder_args, output_extension, source_video_kbps
 from core.media import Cancelled, FFmpegError  # noqa: F401  (Cancelled re-exported for callers)
 from core.names import safe_stem
@@ -60,7 +61,8 @@ def _frame_chain(clip: Clip, W: int, H: int, tag: str, n_frames: int) -> list[st
     tail = (f"fps={FPS},tpad=stop=4:stop_mode=clone,trim=end_frame={n_frames},setpts=PTS-STARTPTS,"
             f"setsar=1,format=yuv420p")
     src = f"[r{tag}]"
-    head = [f"[{tag}:v]setpts=PTS-STARTPTS[r{tag}]"]
+    grade = grade_filter(clip.grade)   # colour correction on the source picture, before scaling and framing
+    head = [f"[{tag}:v]setpts=PTS-STARTPTS{',' + grade if grade else ''}[r{tag}]"]
     if abs(clip.width / clip.height - W / H) < 0.01:
         return head + [f"{src}scale={W}:{H},{tail}[v{tag}]"]
     if clip.framing.mode == "crop":

@@ -7,6 +7,7 @@
 import { getProject, subscribe, ui, setCurrentClip } from "./state.js";
 import * as tm from "./timeline_math.js";
 import { showError } from "./toast.js";
+import { applyGrade } from "./grade.js";
 
 const LOOKAHEAD = 2.0; // seconds before a cut at which the hidden video starts preparing
 const SWITCH_AT = 0.04; // swap when this close to the cut (about one frame)
@@ -42,6 +43,7 @@ async function load(el, clipId, atSrc) {
   const clip = getProject().clips.find((c) => c.id === clipId);
   if (!clip) return false;
   const version = clip.proxy_path ? 1 : 0;
+  applyGrade(el, clip); // the clip's colour correction follows whichever clip this <video> shows
   if (el._clipId !== clipId || el._version !== version) {
     el._clipId = clipId;
     el._version = version;

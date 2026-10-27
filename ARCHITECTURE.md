@@ -115,6 +115,7 @@ are replaced. Checked against a real 92-minute, 1,610-cue Thai file (0.5 s to co
   `core/align.py` matches the cut video's audio against the original (spectral shapes, normalised cross-correlation,
   monotonic offsets, frame-level change points). `core/cutmap.py` then maps caption times (used by `srt_import`).
   Checked on synthetic audio only.
+- **Colour grade** (`core/grade.py`, `web/grade.js`): per-clip `Clip.grade` (-100..100 each); export inserts `colorchannelmixer` + `eq` on the source picture before scaling (`_frame_chain`), the preview applies the equivalent SVG colour matrix to each `<video>`; `tests/fixtures/grade_cases.json` keeps the numbers in step.
 - **Performance**: `core/waveform.audio_profile` decodes audio once (peaks 20/s + RMS per second) and caches it as npz in `audio_cache/`; it is started in a background thread when a clip is added. In the page, `tm.spanIndex` + `subtitleEditedSpan(..., index)` place many subtitles with binary search (was O(subs x segments) per frame/render), and the subtitle list no longer re-renders for selection/style changes.
 - **Vertical covers** (`core/vcover.py`): drawn from scratch (numpy backdrop PNG + logo + ASS text) because there is no vertical original; `/api/covers` takes `format: "vertical"`, optional outro.
 - **Highlight batch export**: queue kind `highlights` (`params.ranges`), one file per range via `run_export(selection=...)`.

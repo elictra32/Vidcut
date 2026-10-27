@@ -33,7 +33,7 @@ const redoStack = [];
 let lastEdit = { why: null, at: 0 };
 
 const snapshot = () => project && structuredClone({
-  clips: project.clips.map((c) => ({ id: c.id, keeps: c.keeps, framing: c.framing, role: c.role, cuts_confirmed: c.cuts_confirmed })),
+  clips: project.clips.map((c) => ({ id: c.id, keeps: c.keeps, framing: c.framing, grade: c.grade, role: c.role, cuts_confirmed: c.cuts_confirmed })),
   subtitles: project.subtitles, style: project.style, selection: project.selection, preset: project.preset,
   overlays: project.overlays, export: { container: project.export.container, quality: project.export.quality, target_mb: project.export.target_mb },
 });
@@ -49,7 +49,7 @@ function pushUndo(snap) {
 function restore(snap) {
   for (const s of snap.clips) {
     const c = project.clips.find((x) => x.id === s.id);
-    if (c) Object.assign(c, { keeps: s.keeps, framing: s.framing, role: s.role, cuts_confirmed: s.cuts_confirmed });
+    if (c) Object.assign(c, { keeps: s.keeps, framing: s.framing, grade: s.grade, role: s.role, cuts_confirmed: s.cuts_confirmed });
   }
   const ids = new Set(project.clips.map((c) => c.id));
   project.subtitles = snap.subtitles.filter((s) => ids.has(s.clip_id));

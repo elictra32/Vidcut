@@ -17,6 +17,16 @@ class Framing:
     crop_center_x: float = 0.5
 
 
+@dataclass
+class Grade:
+    """Colour correction of one clip, each from -100 to 100 (0 = untouched). See core/grade.py."""
+    temperature: float = 0.0  # + warmer (more yellow/orange), - cooler (bluer)
+    tint: float = 0.0         # + towards magenta, - towards green
+    brightness: float = 0.0
+    contrast: float = 0.0
+    saturation: float = 0.0
+
+
 ROLES = ("main", "intro", "outro")  # intro/outro clips are not on the edit timeline; export joins them around the selection
 
 
@@ -32,6 +42,7 @@ class Clip:
     proxy_path: str | None = None
     keeps: list[Keep] = field(default_factory=list)
     framing: Framing = field(default_factory=Framing)
+    grade: Grade = field(default_factory=Grade)
     role: str = "main"
     cuts_confirmed: bool = False  # the user accepted the dead-air cuts; the review strip is tucked away
 
@@ -123,6 +134,7 @@ def project_from_dict(d: dict) -> Project:
         c = dict(c)
         c["keeps"] = [Keep(**k) for k in c.get("keeps", [])]
         c["framing"] = Framing(**c.get("framing", {}))
+        c["grade"] = Grade(**c.get("grade", {}))
         clips.append(Clip(**c))
     sel = d.get("selection")
     return Project(

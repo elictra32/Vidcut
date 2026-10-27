@@ -15,6 +15,7 @@ import { initEpisodes } from "./episodes.js";
 import { initHighlights } from "./highlights.js";
 import { initCovers } from "./covers.js";
 import { initQueuePanel } from "./queue_panel.js";
+import { initColorPanel } from "./color_panel.js";
 import { $ } from "./util.js";
 
 async function main() {
@@ -28,6 +29,7 @@ async function main() {
   initSubtitles();
   initHighlights();
   initStylePanel();
+  initColorPanel();
   initOverlays();
   initExportPanel();
   initEpisodes();
