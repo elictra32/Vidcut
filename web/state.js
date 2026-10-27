@@ -24,6 +24,10 @@ const notify = (why) => listeners.forEach((f) => f(why));
 // overlay placement, export options. Media files and the server's own bookkeeping are never restored.
 const MAX_HISTORY = 100;
 const GROUP_MS = 800; // edits of one kind this close together (typing, dragging a slider) undo as one step
+// only the header buttons listen: re-rendering the panels on every history change would rebuild a text box being typed in
+const historyListeners = new Set();
+export const onHistory = (fn) => (historyListeners.add(fn), () => historyListeners.delete(fn));
+const notifyHistory = () => historyListeners.forEach((f) => f());
 const undoStack = [];
 const redoStack = [];
 let lastEdit = { why: null, at: 0 };
@@ -39,7 +43,7 @@ function pushUndo(snap) {
   undoStack.push(snap);
   if (undoStack.length > MAX_HISTORY) undoStack.shift();
   redoStack.length = 0;
-  notify("history");
+  notifyHistory();
 }
 
 function restore(snap) {
@@ -71,7 +75,7 @@ export function undo() {
   if (!undoStack.length) return false;
   redoStack.push(snapshot());
   restore(undoStack.pop());
-  notify("history");
+  notifyHistory();
   return true;
 }
 
@@ -79,7 +83,7 @@ export function redo() {
   if (!redoStack.length) return false;
   undoStack.push(snapshot());
   restore(redoStack.pop());
-  notify("history");
+  notifyHistory();
   return true;
 }
 

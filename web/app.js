@@ -1,4 +1,4 @@
-import { canRedo, canUndo, getProject, loadProject, redo, subscribe, ui, undo } from "./state.js";
+import { canRedo, canUndo, getProject, loadProject, onHistory, redo, ui, undo } from "./state.js";
 import * as player from "./player.js";
 import { showError } from "./toast.js";
 import { addClipFromDialog, addClipFromPath, initClipsPanel } from "./clips_panel.js";
@@ -32,7 +32,7 @@ async function main() {
   const syncHistory = () => { $("#btn-undo").disabled = !canUndo(); $("#btn-redo").disabled = !canRedo(); };
   $("#btn-undo").addEventListener("click", undo);
   $("#btn-redo").addEventListener("click", redo);
-  subscribe((why) => why === "history" && syncHistory());
+  onHistory(syncHistory);
   window.addEventListener("keydown", (e) => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     if (e.target.closest?.("input, textarea, select, [contenteditable]")) return; // typing keeps the browser's own undo
