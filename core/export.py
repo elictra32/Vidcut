@@ -12,9 +12,9 @@ from pathlib import Path
 
 from core import media
 from core.ass import RenderedSub, to_ass, to_srt
-from core.encode import encoder_args, output_extension
+from core.encode import encoder_args, output_extension, source_video_kbps
 from core.media import Cancelled, FFmpegError  # noqa: F401  (Cancelled re-exported for callers)
-from core.models import Clip, ExportSettings, Project, Selection
+from core.models import Clip, ExportSettings, Overlay, Project, Selection
 from core.presets import PRESETS, Preset
 from core.timeline import Piece, edited_duration, enabled_keeps, selection_pieces, subtitles_for_export
 
@@ -71,8 +71,29 @@ def _frame_chain(clip: Clip, W: int, H: int, tag: str, n_frames: int) -> list[st
                    f"[bb{tag}][ff{tag}]overlay=(W-w)/2:(H-h)/2,{tail}[v{tag}]"]
 
 
+def overlay_statements(overlays: list[Overlay], first_input: int, src: str, W: int, H: int,
+                       timed: bool = True) -> tuple[list[str], str]:
+    """Filter statements laying each image (ffmpeg input first_input + k) over the video labelled `src`.
+    Returns the statements and the label of the result."""
+    stmts, cur = [], src
+    for k, o in enumerate(overlays):
+        i = first_input + k
+        px = max(2, round(o.width * W))
+        stmts.append(f"[{i}:v]scale={px}:-1,format=rgba,colorchannelmixer=aa={_fmt(min(1.0, max(0.0, o.opacity)))}[ov{k}]")
+        gate = ""
+        if timed and (o.start is not None or o.end is not None):
+            a = _fmt(o.start if o.start is not None else 0.0)
+            b = _fmt(o.end) if o.end is not None else "1e9"
+            gate = f":enable='between(t,{a},{b})'"
+        nxt = f"ovo{k}"
+        stmts.append(f"[{cur}][ov{k}]overlay=x={round(o.x * W)}-w/2:y={round(o.y * H)}-h/2:shortest=1{gate}[{nxt}]")
+        cur = nxt
+    return stmts, cur
+
+
 def build_filter_graph(clips: list[Clip], pieces: list[Piece], preset: Preset, ass_name: str | None,
-                       include_audio: bool = True, frames: list[int] | None = None) -> str:
+                       include_audio: bool = True, frames: list[int] | None = None,
+                       overlays: list[Overlay] | None = None, timed_overlays: bool = True) -> str:
     """Per-piece frame-exact video/audio, concatenated; subtitles burned in when `ass_name` is given.
     Outputs are always [vout] and (with audio) [ac]."""
     by_id = {c.id: c for c in clips}
@@ -91,9 +112,15 @@ def build_filter_graph(clips: list[Clip], pieces: list[Piece], preset: Preset, a
                 stmts.append(f"anullsrc=r={AUDIO_RATE}:cl=stereo,atrim=end_sample={samples},asetpts=PTS-STARTPTS[a{i}]")
             concat_in += f"[a{i}]"
     a_flag, a_out = (1, "[ac]") if include_audio else (0, "")
+    ov, label = overlay_statements(overlays or [], len(pieces), "vc", preset.width, preset.height, timed_overlays)
     if ass_name:
         stmts.append(f"{concat_in}concat=n={len(pieces)}:v=1:a={a_flag}[vc]{a_out}")
-        stmts.append(f"[vc]subtitles={ass_name}:fontsdir=fonts[vout]")
+        stmts += ov
+        stmts.append(f"[{label}]subtitles={ass_name}:fontsdir=fonts[vout]")
+    elif ov:
+        stmts.append(f"{concat_in}concat=n={len(pieces)}:v=1:a={a_flag}[vc]{a_out}")
+        stmts += ov
+        stmts.append(f"[{label}]null[vout]")
     else:
         stmts.append(f"{concat_in}concat=n={len(pieces)}:v=1:a={a_flag}[vout]{a_out}")
     return ";\n".join(stmts)
@@ -102,14 +129,19 @@ def build_filter_graph(clips: list[Clip], pieces: list[Piece], preset: Preset, a
 def build_ffmpeg_cmd(clips: list[Clip], pieces: list[Piece], preset: Preset, ass_name: str | None,
                      out_name: str, include_audio: bool = True, frame_only: bool = False,
                      frames: list[int] | None = None, intermediate: bool = False,
-                     encoder: list[str] | None = None) -> list[str]:
+                     encoder: list[str] | None = None, overlays: list[Overlay] | None = None,
+                     timed_overlays: bool = True) -> list[str]:
     """ffmpeg argv (without the binary). One seeked input per piece; the graph is passed inline
     (`-filter_complex_script` is deprecated in FFmpeg 7+)."""
     by_id = {c.id: c for c in clips}
     cmd: list[str] = []
     for p in pieces:
         cmd += ["-ss", _fmt(p.src_start), "-t", _fmt(p.src_end - p.src_start), "-i", by_id[p.clip_id].path]
-    cmd += ["-filter_complex", build_filter_graph(clips, pieces, preset, ass_name, include_audio, frames),
+    length = _fmt(sum(p.src_end - p.src_start for p in pieces) + 1.0)
+    for o in overlays or []:
+        cmd += ["-loop", "1", "-t", length, "-i", o.path]
+    cmd += ["-filter_complex", build_filter_graph(clips, pieces, preset, ass_name, include_audio, frames,
+                                                 overlays, timed_overlays),
             "-map", "[vout]"]
     if include_audio:
         cmd += ["-map", "[ac]"]
@@ -218,15 +250,19 @@ def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=No
     pieces, frames = _plan(pieces)
     if not pieces:
         raise ExportError("selection_invalid", "The selection is too short. Please choose a longer range")
+    for o in project.overlays:
+        if not os.path.isfile(o.path):
+            raise ExportError("overlay_missing", f"Overlay image not found: {o.path}")
     report = progress_cb or (lambda p, m="": None)
     total = sum(p.src_end - p.src_start for p in pieces)
     ext = output_extension(project.export)
-    encoder = encoder_args(project.export, preset.name, total)
+    encoder = encoder_args(project.export, preset.name, total, source_video_kbps(project.clips))
     out_name = f"out.{ext}"
     wd = _workdir(preset, project, rendered)
     try:
         if len(pieces) <= BATCH:
-            cmd = build_ffmpeg_cmd(project.clips, pieces, preset, "subs.ass", out_name, frames=frames, encoder=encoder)
+            cmd = build_ffmpeg_cmd(project.clips, pieces, preset, "subs.ass", out_name, frames=frames, encoder=encoder,
+                                   overlays=project.overlays)
             _ffmpeg(cmd, total, progress_cb, cancel_event, wd)
         else:
             # Bounded passes: each batch is rendered to a scratch part, then one pass joins the parts
@@ -244,8 +280,12 @@ def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=No
                 done += length
             Path(wd, "parts.txt").write_text("".join(f"file 'part_{k}.mkv'\n" for k in range(len(spans))),
                                              encoding="utf-8")
-            final = ["-f", "concat", "-safe", "0", "-i", "parts.txt", "-vf", "subtitles=subs.ass:fontsdir=fonts",
-                     *encoder, out_name]
+            final = ["-f", "concat", "-safe", "0", "-i", "parts.txt"]
+            for o in project.overlays:
+                final += ["-loop", "1", "-t", _fmt(total + 1.0), "-i", o.path]
+            ov, label = overlay_statements(project.overlays, 1, "vc", preset.width, preset.height)
+            graph = ";".join(["[0:v]null[vc]", *ov, f"[{label}]subtitles=subs.ass:fontsdir=fonts[vout]"])
+            final += ["-filter_complex", graph, "-map", "[vout]", "-map", "0:a?", *encoder, out_name]
             _ffmpeg(final, total, lambda f, m="": report(0.8 + 0.2 * f, m), cancel_event, wd)
         os.makedirs(out_dir, exist_ok=True)
         with _name_lock:
@@ -266,7 +306,8 @@ def render_preview_frame(project: Project, edited_t: float, out_png: str) -> Non
     wd = _workdir(preset, project, rendered)
     try:
         cmd = build_ffmpeg_cmd(project.clips, pieces, preset, "subs.ass", "frame.png",
-                               include_audio=False, frame_only=True, frames=frames)
+                               include_audio=False, frame_only=True, frames=frames,
+                               overlays=[o for o in project.overlays if os.path.isfile(o.path)], timed_overlays=False)
         try:
             media.run_ffmpeg(cmd, cwd=wd)
         except FFmpegError as e:

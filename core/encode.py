@@ -25,29 +25,54 @@ def output_extension(s: ExportSettings) -> str:
     return _normalized(s).container
 
 
-def video_kbps(s: ExportSettings, preset_name: str, duration: float) -> int:
+# A re-encode can't add detail the source never had: spending 8 Mbps on a 1.8 Mbps phone clip only makes
+# a bigger file. So each quality level is a share of the source bitrate, capped by the table above.
+SOURCE_SHARE = {"high": 1.2, "medium": 0.8, "small": 0.5}
+MIN_CAPPED_KBPS = 800
+
+
+def source_video_kbps(clips) -> float | None:
+    """Average video bitrate of the clips' files (file size over duration, less a typical audio track)."""
+    import os
+    size = dur = 0.0
+    for c in clips:
+        try:
+            size += os.path.getsize(c.path)
+        except OSError:
+            continue
+        dur += c.duration
+    if dur <= 0 or size <= 0:
+        return None
+    return max(500.0, size * 8 / dur / 1000 - 128)
+
+
+def video_kbps(s: ExportSettings, preset_name: str, duration: float, source_kbps: float | None = None) -> int:
     s = _normalized(s)
     table = QUALITY_KBPS.get(preset_name, QUALITY_KBPS["tiktok"])
     if s.quality == "custom" and s.target_mb and duration > 0:
         stream_bytes = s.target_mb * 1048576 / CONTAINER_OVERHEAD
         return max(MIN_VIDEO_KBPS, round(stream_bytes * 8 / duration / 1000 - AUDIO_KBPS[s.container]))
-    return table["medium" if s.quality == "custom" else s.quality]
+    quality = "medium" if s.quality == "custom" else s.quality
+    kbps = table[quality]
+    if source_kbps:
+        kbps = min(kbps, max(MIN_CAPPED_KBPS, round(source_kbps * SOURCE_SHARE[quality])))
+    return kbps
 
 
-def estimate_bytes(s: ExportSettings, preset_name: str, duration: float) -> int:
+def estimate_bytes(s: ExportSettings, preset_name: str, duration: float, source_kbps: float | None = None) -> int:
     """Expected size of the file. Exact for a constant bitrate; real encoders land within ~10-15%,
     below the figure for easy footage."""
     if duration <= 0:
         return 0
     s = _normalized(s)
-    kbps = video_kbps(s, preset_name, duration) + AUDIO_KBPS[s.container]
+    kbps = video_kbps(s, preset_name, duration, source_kbps) + AUDIO_KBPS[s.container]
     return round(kbps * 1000 / 8 * duration * CONTAINER_OVERHEAD)
 
 
-def encoder_args(s: ExportSettings, preset_name: str, duration: float) -> list[str]:
+def encoder_args(s: ExportSettings, preset_name: str, duration: float, source_kbps: float | None = None) -> list[str]:
     """ffmpeg codec/bitrate/container options for the final file (everything between the maps and the output name)."""
     s = _normalized(s)
-    v = video_kbps(s, preset_name, duration)
+    v = video_kbps(s, preset_name, duration, source_kbps)
     rate = ["-b:v", f"{v}k", "-maxrate", f"{round(v * 1.25)}k", "-bufsize", f"{v * 2}k"]
     if s.container == "webm":
         return ["-c:v", "libvpx-vp9", *rate, "-deadline", "good", "-cpu-used", "4", "-row-mt", "1", "-pix_fmt", "yuv420p",

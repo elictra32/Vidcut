@@ -77,3 +77,29 @@ def test_export_settings_roundtrip_through_project_json():
     p.export = ExportSettings(container="mkv", quality="custom", target_mb=25.0, out_dir="D:\\Shorts")
     assert project_from_dict(project_to_dict(p)).export == p.export
     assert Project().export == ExportSettings()  # mp4 / medium / default folder
+
+
+def test_quality_never_exceeds_a_share_of_the_source_bitrate():
+    from core.encode import video_kbps
+    s = ExportSettings(quality="high")
+    assert video_kbps(s, "tiktok", 60) == 8000                      # unknown source: the table value
+    assert video_kbps(s, "tiktok", 60, source_kbps=1800) == 2160   # a 1.8 Mbps phone clip is not inflated to 8 Mbps
+    assert video_kbps(s, "tiktok", 60, source_kbps=20000) == 8000  # a rich source is still capped by the table
+    assert video_kbps(ExportSettings(quality="small"), "tiktok", 60, source_kbps=1800) == 900
+    assert video_kbps(ExportSettings(quality="small"), "tiktok", 60, source_kbps=200) == 800  # never below the floor
+
+
+def test_custom_target_size_ignores_the_source_bitrate():
+    from core.encode import video_kbps
+    s = ExportSettings(quality="custom", target_mb=20)
+    assert video_kbps(s, "tiktok", 60, source_kbps=100000) == video_kbps(s, "tiktok", 60)
+
+
+def test_source_video_kbps_from_file_size(tmp_path):
+    from core.encode import source_video_kbps
+    from core.models import Clip
+    f = tmp_path / "a.mp4"
+    f.write_bytes(b"0" * 1_000_000)
+    c = Clip("c", str(f), 10.0, 100, 100, 25, True)
+    assert abs(source_video_kbps([c]) - (1_000_000 * 8 / 10 / 1000 - 128)) < 1
+    assert source_video_kbps([]) is None

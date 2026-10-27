@@ -21,7 +21,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import media
 from core.autosub import generate_subtitles
-from core.encode import AUDIO_KBPS, _normalized, estimate_bytes, video_kbps
+from core.encode import AUDIO_KBPS, _normalized, estimate_bytes, source_video_kbps, video_kbps
 from core.export import export_duration, render_preview_frame, run_export
 from core.fonts import FONT_FILES
 from core.media import FFmpegError, is_browser_playable, make_proxy, probe
@@ -344,8 +344,10 @@ def create_app(home: str | None = None) -> FastAPI:
         except ValueError as e:  # "selection_invalid" -> the Thai message
             raise from_exception(e) from e
         s = _normalized(snap.export)
-        return {"seconds": seconds, "bytes": estimate_bytes(s, snap.preset, seconds),
-                "video_kbps": video_kbps(s, snap.preset, seconds), "audio_kbps": AUDIO_KBPS[s.container]}
+        src = source_video_kbps(snap.clips)
+        return {"seconds": seconds, "bytes": estimate_bytes(s, snap.preset, seconds, src),
+                "video_kbps": video_kbps(s, snap.preset, seconds, src), "audio_kbps": AUDIO_KBPS[s.container],
+                "source_kbps": round(src) if src else None}
 
     @app.post("/api/preview-frame")
     def post_preview_frame(body: dict):

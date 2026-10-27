@@ -499,8 +499,10 @@ def test_estimate_reports_length_and_size(client, tmp_path):
     put_project(client, selection={"start": 0, "end": 2})
     r = client.post("/api/export/estimate").json()
     assert r["seconds"] == pytest.approx(2.0, abs=0.05)
-    assert r["bytes"] == estimate_bytes(ExportSettings(), "tiktok", r["seconds"])
-    assert r["video_kbps"] == 5000 and r["audio_kbps"] == 160
+    # the test clip is a few kbps, so the quality level is capped to its share of the source bitrate
+    assert r["source_kbps"] is not None and r["video_kbps"] == min(5000, max(800, round(r["source_kbps"] * 0.8)))
+    assert r["bytes"] == estimate_bytes(ExportSettings(), "tiktok", r["seconds"], r["source_kbps"])
+    assert r["audio_kbps"] == 160
 
 
 def test_estimate_follows_the_chosen_target_size(client, tmp_path):

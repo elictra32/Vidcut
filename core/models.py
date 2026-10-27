@@ -64,6 +64,20 @@ class SubtitleStyle:
 
 
 @dataclass
+class Overlay:
+    """A logo/photo laid over the video. x,y = centre as fractions of the frame; width = fraction of the frame
+    width; start/end are seconds in the EXPORTED file (None = the whole video)."""
+    id: str
+    path: str
+    x: float = 0.88
+    y: float = 0.1
+    width: float = 0.2
+    opacity: float = 1.0
+    start: float | None = None
+    end: float | None = None
+
+
+@dataclass
 class Selection:
     start: float
     end: float
@@ -93,6 +107,7 @@ class Project:
     style: SubtitleStyle = field(default_factory=_default_style)
     preset: str = DEFAULT_PRESET
     export: ExportSettings = field(default_factory=ExportSettings)
+    overlays: list[Overlay] = field(default_factory=list)
     rev: int = 0  # bumped whenever the server itself changes the project (jobs); stale saves are refused
 
 
@@ -115,5 +130,6 @@ def project_from_dict(d: dict) -> Project:
         style=SubtitleStyle(**d.get("style", {})),
         preset=d.get("preset", "tiktok"),
         export=ExportSettings(**d.get("export", {})),
+        overlays=[Overlay(**o) for o in d.get("overlays", [])],
         rev=int(d.get("rev", 0)),
     )
