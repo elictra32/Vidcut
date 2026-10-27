@@ -336,9 +336,13 @@ def create_app(home: str | None = None) -> FastAPI:
     @app.post("/api/overlays")
     def post_overlay(body: dict):
         if body.get("brand"):
-            name = str(body["brand"])
-            if name not in brand_logo_files():  # only the shipped files: never a path from the page
-                raise AppError("file_missing", "That logo isn't in the Vidcut logo folder", status=404)
+            files = brand_logo_files()
+            # only the shipped files: never a path from the page (a different letter case is still the same file on Windows)
+            name = next((f for f in files if f.lower() == os.path.basename(str(body["brand"])).lower()), None)
+            if name is None:
+                raise AppError("file_missing", "That logo isn't in the Vidcut logo folder",
+                               f"Vidcut looked in {BRAND_LOGOS_DIR} and found {len(files)} logo file(s). "
+                               "If that is not the folder you expect, close Vidcut completely (Quit) and open it again", status=404)
             result = add_overlay(str(BRAND_LOGOS_DIR / name))
             if body.get("replace"):
                 # picking another colour/shape swaps the earlier brand logo (it keeps its position, size and timing)
@@ -581,6 +585,7 @@ def create_app(home: str | None = None) -> FastAPI:
                 raise AppError("covers_invalid", "The date is not valid", "Use the date picker or type the date text") from e
             default_date = thai_date(d.year, d.month, d.day)
         title_font, date_font = str(body.get("title_font") or "Montserrat"), str(body.get("date_font") or "Sarabun")
+        outro_font = str(body.get("outro_font") or "Prompt Light")
         replace = bool(body.get("replace_intros", True))
 
         def work(progress, cancel):
@@ -606,7 +611,7 @@ def create_app(home: str | None = None) -> FastAPI:
                 outro_file = os.path.join(st.covers, "THUS_outro_vertical.mp4")
                 try:
                     render_vertical_cover("outro", outro_file, outro_text=str(body.get("outro_text") or DEFAULT_OUTRO_TEXT)[:300],
-                                          date_font=date_font, cancel=cancel)
+                                          outro_font=outro_font, cancel=cancel)
                 except CoverError as e:
                     raise AppError(e.code, e.message, "", e.details) from e
             clips = []

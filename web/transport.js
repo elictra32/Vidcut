@@ -51,7 +51,7 @@ export function initTransport() {
 
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea, select, [contenteditable]")) return;
-    if (e.code === "Space") (e.preventDefault(), player.toggle());
+    if (e.code === "Space") (e.preventDefault(), document.activeElement?.blur?.(), player.toggle()); // blur: Space must not also "click" the button that has focus
     else if (e.key === "i") setIn(player.getTime());
     else if (e.key === "o") setOut(player.getTime());
     else if (e.key === "s") cutHere();

@@ -56,6 +56,14 @@ try {
   const introId = (await (await fetch(`${app.base}/api/project`)).json()).project.clips.find((c) => c.role === "intro").id;
   must(seen.id === introId && seen.t > 0.3, `Play plays the cover itself (clip ${seen.id}, at ${seen.t.toFixed(1)} s)`);
   await page.waitForTimeout(2600);
+  // Space right after clicking a cover (the clip button still has focus) plays the cover and does not wander off to the main video
+  await page.locator(".clip-list li", { hasText: "Intro for EP 1" }).locator(".clip-main").click();
+  await page.waitForTimeout(500);
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(1000);
+  const sp = await page.evaluate(async () => { const pl = await import("/player.js"); return { id: pl.getLoadedClipId(), t: pl.getSourceTime(), playing: pl.isPlaying() }; });
+  must(sp.id === introId && sp.playing && sp.t > 0.3 && sp.t < 2.2, `Space plays the cover from its start and stays on it (${JSON.stringify({ ...sp, t: +sp.t.toFixed(1) })})`);
+  await page.waitForTimeout(2600);
   must(!(await page.evaluate(async () => (await import("/player.js")).isPlaying())), "it stops at the end of the cover");
   must(problems.length === 0, "no console errors" + (problems.length ? ": " + problems.join(" | ") : ""));
 } catch (e) {

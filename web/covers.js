@@ -33,11 +33,16 @@ export function initCovers() {
   titles.addEventListener("change", () => remember("vidcut.coverTitles", titles.value));
   const replace = el("input", { type: "checkbox", id: "cover-replace", checked: true });
   const fontSel = (id, value) => {
-    const s = el("select", { id }, getFonts().map((f) => el("option", { value: f }, f)));
+    const s = el("select", { id }, getFonts().map((f) => el("option", { value: f, style: `font-family: "${f}"` }, f)));
     s.value = value;
     return s;
   };
-  const titleFont = fontSel("cover-title-font", "Montserrat"), dateFont = fontSel("cover-date-font", "Prompt Light");
+  const titleFont = fontSel("cover-title-font", "Montserrat"), dateFont = fontSel("cover-date-font", "Prompt Light"), outroFont = fontSel("cover-outro-font", "Prompt Light");
+  for (const [sel, key] of [[titleFont, "T"], [dateFont, "D"], [outroFont, "O"]]) {
+    const saved = recall(`vidcut.coverFont${key}`, "");
+    if (saved && getFonts().includes(saved)) sel.value = saved;
+    sel.addEventListener("change", () => remember(`vidcut.coverFont${key}`, sel.value));
+  }
   const format = el("select", { id: "cover-format" }, el("option", { value: "landscape" }, "Landscape: copy the look of one of your covers"),
     el("option", { value: "vertical" }, "Vertical (TikTok 1080×1920): drawn by Vidcut"));
   format.value = recall("vidcut.coverFormat", "landscape");
@@ -80,7 +85,7 @@ export function initCovers() {
       const { job } = await withSavedProject(() => api("POST", "/api/covers", {
         format: vertical ? "vertical" : "landscape", with_outro: withOutro.checked, outro_text: outroText.value,
         template_clip_id: template.value, items, date_text: dateText.value.trim(), replace_intros: replace.checked,
-        title_font: titleFont.value, date_font: dateFont.value }));
+        title_font: titleFont.value, date_font: dateFont.value, outro_font: outroFont.value }));
       const done = await trackJob("Making covers", job);
       if (!done) return;
       await loadProject();
@@ -102,7 +107,9 @@ export function initCovers() {
     el("label", { class: "field" }, el("span", {}, "Episode titles"), titles),
     el("label", { class: "field inline" }, el("span", {}, "Replace the current Intro (and Outro) clips"), replace),
     el("details", {}, el("summary", {}, "Fonts"),
-      el("label", { class: "field" }, el("span", {}, "Title"), titleFont), el("label", { class: "field" }, el("span", {}, "Date"), dateFont)),
+      el("label", { class: "field" }, el("span", {}, "Title (front cover)"), titleFont), el("label", { class: "field" }, el("span", {}, "Date (front cover)"), dateFont),
+      el("label", { class: "field" }, el("span", {}, "Text of the back cover"), outroFont),
+      el("p", { class: "muted small" }, "Each font name is shown in its own style. All of them draw Thai and English.")),
     make);
   subscribe((why) => (why === "load" || why === "keeps" || why === "edit") && fillTemplates());
   fillTemplates();

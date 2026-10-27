@@ -988,3 +988,12 @@ def test_vertical_covers_are_drawn_without_a_template_and_the_outro_replaces_the
     assert [c["role"] for c in clips] == ["intro", "intro", "outro"]
     assert all((c["width"], c["height"]) == (1080, 1920) and 2.5 < c["duration"] < 3.5 and c["has_audio"] for c in clips)
     assert done["result"]["names"][0].endswith("_vertical.mp4")
+
+
+def test_brand_logo_lookup_ignores_case_and_a_bad_name_says_where_it_looked(client):
+    files = client.get("/api/brand-logos").json()["files"]
+    ok = client.post("/api/overlays", json={"brand": files[0].upper().replace(".PNG", ".png")})
+    assert ok.status_code == 200 and ok.json()["overlay"]["path"].endswith(files[0])
+    bad = client.post("/api/overlays", json={"brand": "nope.png"})
+    err = bad.json()["error"]
+    assert bad.status_code == 404 and "logo" in err["hint"] and str(len(files)) in err["hint"]

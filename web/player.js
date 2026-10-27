@@ -91,10 +91,10 @@ export async function seek(t) {
 
 /** Show a clip's first kept moment (or its start when everything is cut) for review. */
 export async function showClip(clipId) {
-  review = false;
   const p = getProject();
   const clip = p.clips.find((c) => c.id === clipId);
   if (!clip) return;
+  if (review || (clip.role ?? "main") !== "main") pause(); // opening a cover stops whatever was playing, so it can't carry on into the main video
   const keeps = tm.enabledKeeps(clip);
   const first = keeps[0];
   // a cover fades its texts in, so its first frame is empty: open it near the end, when everything is on screen

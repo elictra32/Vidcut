@@ -18,6 +18,14 @@ FONT_FILES = {
     "Prompt Medium": "Prompt-Medium.ttf",
     "Montserrat": "Montserrat-Regular.ttf",  # the THUS brand typeface (official static Regular/Medium from Google Fonts)
     "Montserrat Medium": "Montserrat-Medium.ttf",
+    # more looks for covers and subtitles (all SIL OFL, from Google Fonts); each draws Thai and Latin
+    "Kanit Medium": "Kanit-Medium.ttf",              # modern, rounded-square: good for big titles
+    "Kanit Light": "Kanit-Light.ttf",
+    "Mitr Medium": "Mitr-Medium.ttf",                # friendly, heavy rounded
+    "Bai Jamjuree Medium": "BaiJamjuree-Medium.ttf", # clean, a little techy
+    "Chakra Petch Medium": "ChakraPetch-Medium.ttf", # angular, trading / tech feel
+    "IBM Plex Sans Thai Medium": "IBMPlexSansThai-Medium.ttf",  # neutral and very readable
+    "Pridi Medium": "Pridi-Medium.ttf",              # serif, elegant
 }
 
 

@@ -3,6 +3,7 @@ gradient, the white logo, the episode title in white with an orange accent line 
 app overlays (top 10 %, bottom 20 %, right 15 % of the frame). The landscape sample covers can't be reused: there is no
 vertical original to copy, so this is a new design in the same colours and fonts."""
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -54,6 +55,12 @@ def wrap(text: str, font: str, px: float, max_w: float, spacing: float = 0.0) ->
     return lines or [""]
 
 
+def letter_spacing(text: str) -> float:
+    """A little air between Latin letters. Thai gets none: libass places spaced glyphs one by one and then drops the
+    tone marks that stack above a vowel (ที่ becomes ที)."""
+    return 0.0 if re.search("[\u0e00-\u0e7f]", text) else 1.5
+
+
 def fit_title(title: str, font: str, spacing: float = 1.5) -> tuple[list[str], float]:
     """The largest size (from 68 px down) at which the title fits in at most 3 lines of the box."""
     for px in (68, 60, 54, 48, 42):
@@ -63,8 +70,8 @@ def fit_title(title: str, font: str, spacing: float = 1.5) -> tuple[list[str], f
     return wrap(title, font, 42, BOX_W, spacing)[:3], 42
 
 
-def build_ass(kind: str, title: str, date_text: str, outro_text: str, title_font: str, date_font: str) -> str:
-    tf, df = ass_size_factor(title_font), ass_size_factor(date_font)
+def build_ass(kind: str, title: str, date_text: str, outro_text: str, title_font: str, date_font: str, outro_font: str) -> str:
+    tf, df, of = ass_size_factor(title_font), ass_size_factor(date_font), ass_size_factor(outro_font)
     end = DURATION[kind]
     out = [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {VW}", f"PlayResY: {VH}", "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
@@ -89,9 +96,10 @@ def build_ass(kind: str, title: str, date_text: str, outro_text: str, title_font
            f"m 0 0 l {w} 0 {w} {h} 0 {h}" + "{\\p0}")
 
     if kind == "intro":
-        lines, px = fit_title(title.strip(), title_font)
+        spacing = letter_spacing(title)
+        lines, px = fit_title(title.strip(), title_font, spacing)
         line_h = px * 1.4
-        style("Title", title_font, px, WHITE, 1.5, tf)
+        style("Title", title_font, px, WHITE, spacing, tf)
         style("Date", date_font, 46, DARK, 0.0, df)
         bar(715, 0.8)
         top = 790
@@ -103,8 +111,8 @@ def build_ass(kind: str, title: str, date_text: str, outro_text: str, title_font
         ev("Box", 1.25, end, f"\\an5\\pos({cx},{pill_y:.0f})\\1c&H{ASS_ORANGE}&\\bord0\\shad0\\p1\\fad(400,{fo})", pill(w, 84) + "{\\p0}")
         ev("Date", 1.25, end, f"\\pos({cx},{pill_y + 3:.0f})\\fad(400,{fo})", _escape(date_text.strip()))
     else:
-        style("Out1", date_font, 66, WHITE, 0.0, df)
-        style("Out", date_font, 52, SOFT, 0.0, df)
+        style("Out1", outro_font, 66, WHITE, 0.0, of)
+        style("Out", outro_font, 52, SOFT, 0.0, of)
         rows = [ln.strip() for ln in outro_text.splitlines() if ln.strip()][:4]
         bar(1005, 0.6)
         for i, ln in enumerate(rows):
@@ -130,13 +138,13 @@ def _background(path: str, glow_y: float) -> None:
 
 
 def render_vertical_cover(kind: str, out_path: str, *, title: str = "", date_text: str = "", outro_text: str = DEFAULT_OUTRO_TEXT,
-                          title_font: str = "Montserrat", date_font: str = "Prompt Light", logo: str = "THUS_logo_white.png",
+                          title_font: str = "Montserrat", date_font: str = "Prompt Light", outro_font: str = "Prompt Light", logo: str = "THUS_logo_white.png",
                           cancel=None) -> str:
     if kind not in DURATION:
         raise CoverError("cover_kind", "Unknown cover kind")
     if kind == "intro" and not title.strip():
         raise CoverError("title_empty", "Type the episode title first")
-    for f in (title_font, date_font):
+    for f in (title_font, date_font, outro_font):
         if f not in FONT_FILES:
             raise CoverError("font_unknown", f"Unknown font: {f}")
     logo_path = LOGO_DIR / logo
@@ -146,7 +154,7 @@ def render_vertical_cover(kind: str, out_path: str, *, title: str = "", date_tex
     wd = tempfile.mkdtemp(prefix="vidcut_vcover_")
     try:
         shutil.copytree(FONTS_DIR, Path(wd, "fonts"))
-        Path(wd, "cover.ass").write_text(build_ass(kind, title, date_text, outro_text, title_font, date_font), encoding="utf-8")
+        Path(wd, "cover.ass").write_text(build_ass(kind, title, date_text, outro_text, title_font, date_font, outro_font), encoding="utf-8")
         shutil.copy(logo_path, Path(wd, "logo.png"))
         logo_y = 560 if kind == "intro" else 700            # centre of the logo
         s = "(0.88+0.12*clip(t/1.6,0,1))"
