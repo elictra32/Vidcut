@@ -1,0 +1,78 @@
+{
+  "note": "Pinned to the commits reviewed on 2026-10-27. Bump a commit only after reading the new SKILL.md files.",
+  "skills": [
+    {
+      "id": "herk-edit-kit",
+      "step": "1. ตัดคลิปดิบ (dead air, mistakes)",
+      "repo": "https://github.com/nateherkai/herk-edit-kit.git",
+      "commit": "10511e5af86fc47756ea89803b397422e2d89284",
+      "license": "MIT",
+      "workspace": {"exclude": ["video-projects", "examples", ".agents", ".git", "node_modules"]},
+      "usage": "Open third_party/herk-edit-kit in Claude Code: 'Use edit-video to edit my recording at <file>. Tighten dead air and show me the proposed mistake cuts.'"
+    },
+    {
+      "id": "ffmpeg-skill",
+      "step": "2. ซับ ครอป เสียง",
+      "repo": "https://github.com/kajisho5/ffmpeg-skill.git",
+      "commit": "1c37ad1cae49f1127cc82919ba9e73bb1f330c65",
+      "license": "MIT",
+      "skills": [{"src": ".", "dest": "ffmpeg-skill", "include": ["SKILL.md", "scripts", "references", "templates", "LICENSE"]}],
+      "usage": "ครอปคลิปนี้เป็น 9:16 สำหรับ Reels แล้วปรับเสียงให้ดังพอดี"
+    },
+    {
+      "id": "claude-remotion-skill",
+      "step": "3. ไตเติล intro ป้ายชื่อ",
+      "repo": "https://github.com/haidrrrry/claude-remotion-skill.git",
+      "commit": "1dcbe5e3fc6cf970bd10d3cc05f0a8a5d19d0383",
+      "license": "MIT",
+      "skills": [{"src": "remotion-motion-graphics", "dest": "remotion-motion-graphics"}],
+      "usage": "ทำ intro 4 วินาทีบนคลิป clip.mp4 ขนาด 1080x1920 มีไตเติล และป้ายชื่อมุมล่าง"
+    },
+    {
+      "id": "video-shotcraft",
+      "step": "4. ช็อตแบบหนัง คลิปโปรโมต",
+      "repo": "https://github.com/Vincentwei1021/video-shotcraft.git",
+      "commit": "43bd349a136651865ecfa6ea1cf012f6e957d304",
+      "license": "Apache-2.0",
+      "skills": [{"src": ".", "dest": "video-shotcraft", "include": ["SKILL.md", "references", "template", "LICENSE"]}],
+      "usage": "ใช้ช็อต spotlight-hero-card กับคลิป clip.mp4 ขนาด 1440x1080"
+    },
+    {
+      "id": "text-to-lottie",
+      "step": "5. สติกเกอร์ ไอคอนขยับ",
+      "repo": "https://github.com/diffusionstudio/lottie.git",
+      "commit": "3c72912fad543897f90045ed4d355813837927fc",
+      "license": "MIT",
+      "skills": [{"src": "skills/text-to-lottie", "dest": "text-to-lottie"}],
+      "workspace": {"exclude": [".git", "node_modules", "bun.lock"]},
+      "usage": "ทำ Lottie ไอคอนหัวใจเด้ง พื้นใส ขนาด 512x512 ยาว 2 วินาที (player อยู่ใน third_party/text-to-lottie ใช้ npm install && npm run dev)"
+    },
+    {
+      "id": "emil-kowalski-skills",
+      "step": "6. ป๊อปอัป การ์ด UI",
+      "repo": "https://github.com/emilkowalski/skills.git",
+      "commit": "2d228630ba1446365f614a108cb8252f1feda202",
+      "license": "MIT",
+      "skills": [{"src": "skills/*"}],
+      "usage": "ใช้ skill animate ทำการ์ดแจ้งเตือน 3 ใบที่เด้งขึ้นซ้อนกันแบบ Sonner พื้นหลังใส"
+    },
+    {
+      "id": "gsap-skills",
+      "step": "7. คำเด้งตามจังหวะพูด",
+      "repo": "https://github.com/greensock/gsap-skills.git",
+      "commit": "aed9cfd3277740755f6bfc1155c7aa645403b760",
+      "license": "MIT",
+      "skills": [{"src": "skills/*"}],
+      "usage": "ทำข้อความ 3 คำเด้งขึ้นที่วินาที 0.6, 1.5 และ 2.9 ด้วย GSAP timeline พื้นหลังใส"
+    },
+    {
+      "id": "threejs-skills",
+      "step": "8. วัตถุ 3D",
+      "repo": "https://github.com/CloudAI-X/threejs-skills.git",
+      "commit": "0e181866f095b5f06d005133876e926515390d95",
+      "license": "MIT",
+      "skills": [{"src": "skills/*"}],
+      "usage": "ทำปุ่ม play 3D สีส้มหมุนลอย พื้นใส ขนาด 600x600 ด้วย three.js"
+    }
+  ]
+}

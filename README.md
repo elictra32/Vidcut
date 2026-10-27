@@ -99,3 +99,7 @@ python -m pytest -m slow -o addopts=""               # ทดสอบกับ�
 ```
 
 โครงสร้างและกติกาของโค้ดดูที่ [ARCHITECTURE.md](ARCHITECTURE.md)
+
+## Claude Skills สำหรับตัดต่อ
+
+ดับเบิลคลิก `install_skills.bat` เพื่อลง 8 skills (ตัดคลิปดิบ ซับ/ครอป/เสียง ไตเติล ช็อตหนัง Lottie ป๊อปอัป GSAP 3D) ดูวิธีใช้ใน [docs/skills.md](docs/skills.md)
