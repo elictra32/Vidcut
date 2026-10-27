@@ -34,6 +34,14 @@ try {
   await page.waitForTimeout(500);
   must(true, "dead air detected");
 
+  // confirming the cuts tucks the review strip away; it can be reopened
+  must(await page.isVisible("#cut-strip-wrap canvas"), "the review strip is shown before confirming");
+  await page.click("#btn-confirm-cuts");
+  must(!(await page.isVisible("#cut-strip-wrap canvas")) && await page.isVisible("#btn-edit-cuts"), "Confirm cuts hides the review strip");
+  await page.click("#btn-edit-cuts");
+  must(await page.isVisible("#cut-strip-wrap canvas"), "Edit cuts brings the review strip back");
+  await page.click("#btn-confirm-cuts");
+
   const tl = await (await page.$("#edit-timeline-wrap canvas")).boundingBox();
   await page.mouse.click(tl.x + tl.width * 0.05, tl.y + 60); await page.click("text=Set In");
   await page.mouse.click(tl.x + tl.width * 0.6, tl.y + 60); await page.click("text=Set Out");
@@ -85,6 +93,10 @@ try {
   await page.click("text=Export video");
   await page.waitForSelector(".export-result:has-text('picked-folder')", { timeout: 120000 });
   must(existsSync(join(pickedDir, "demo_tiktok.mkv")) && existsSync(join(pickedDir, "demo_tiktok.srt")), "the MKV and .srt were written to the chosen folder");
+  // delete every subtitle at once
+  await page.click("#btn-delete-all-subs");
+  await page.waitForSelector(".sub-list .sub-row", { state: "detached", timeout: 5000 });
+  must((await page.$$(".sub-list .sub-row")).length === 0, "Delete all removes every subtitle");
   must(problems.length === 0, "no console errors" + (problems.length ? ": " + problems.join(" | ") : ""));
 } catch (e) {
   failed = true;

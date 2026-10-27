@@ -1,6 +1,6 @@
 // The cut strip: SOURCE time of the current clip, with every keep and every removed gap
 // visible. Click a kept segment to cut it, or a removed region to bring it back.
-import { getProject, subscribe, ui, updateKeeps } from "./state.js";
+import { getProject, subscribe, ui, update, updateKeeps } from "./state.js";
 import * as player from "./player.js";
 import * as tm from "./timeline_math.js";
 import { ensurePeaks, peakMax } from "./waveforms.js";
@@ -93,7 +93,7 @@ const draw = rafThrottle(() => {
 
 function toggleAt(t) {
   const c = clip();
-  if (!c) return;
+  if (!c || c.cuts_confirmed) return;
   const hit = regions(c).find(([a, b]) => t >= a && t <= b);
   if (!hit) return;
   const [a, b, kind, keep] = hit;
@@ -111,11 +111,24 @@ function toggleAt(t) {
 export function initCutStrip() {
   const wrap = $("#cut-strip-wrap");
   canvas = el("canvas", { class: "timeline-canvas", height: 110 });
+  const setConfirmed = (v) => update((p) => { const c = p.clips.find((x) => x.id === ui.currentClipId); if (c) c.cuts_confirmed = v; }, "confirm");
+  const confirmBtn = el("button", { class: "primary", id: "btn-confirm-cuts", onclick: () => setConfirmed(true) }, "Confirm cuts");
+  const confirmed = el("div", { class: "cuts-confirmed", hidden: true },
+    el("span", {}, "✓ Cuts confirmed for this clip"), el("button", { class: "ghost", id: "btn-edit-cuts", onclick: () => setConfirmed(false) }, "Edit cuts"));
+  const syncConfirm = () => {
+    const c = clip();
+    const done = !!c?.cuts_confirmed;
+    canvas.hidden = done || !c;
+    confirmBtn.hidden = done || !c;
+    hint.hidden = done;
+    confirmed.hidden = !done;
+  };
   hint = el("span", { class: "muted" }, "Click a green section to cut it · click a red one to bring it back · mouse wheel to zoom, drag to pan");
   wrap.replaceChildren(
     el("div", { class: "tl-bar" }, el("strong", {}, "Review cuts (time in the original file)"), el("span", { class: "spacer" }), hint,
-      el("button", { class: "ghost", onclick: () => (fit(), draw()) }, "Whole clip")),
-    canvas);
+      el("button", { class: "ghost", onclick: () => (fit(), draw()) }, "Whole clip"),
+      confirmBtn),
+    canvas, confirmed);
 
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
@@ -143,9 +156,11 @@ export function initCutStrip() {
   }, { passive: false });
 
   subscribe((why) => {
+    syncConfirm();
     if (why === "load") getProject().clips.forEach((c) => ensurePeaks(c, draw));
     draw();
   });
   player.onTime(draw);
+  syncConfirm();
   new ResizeObserver(draw).observe(canvas);
 }

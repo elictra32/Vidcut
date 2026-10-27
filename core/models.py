@@ -33,6 +33,7 @@ class Clip:
     keeps: list[Keep] = field(default_factory=list)
     framing: Framing = field(default_factory=Framing)
     role: str = "main"
+    cuts_confirmed: bool = False  # the user accepted the dead-air cuts; the review strip is tucked away
 
 
 @dataclass

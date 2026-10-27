@@ -85,6 +85,15 @@ function addBlank() {
   setSelectedSub(id);
 }
 
+function deleteAll() {
+  const n = getProject().subtitles.length;
+  if (!n) return showToast("There are no subtitles to delete", "error");
+  if (!confirm(`Delete all ${n} subtitles? This can't be undone.`)) return;
+  update((q) => (q.subtitles = []), "subs");
+  setSelectedSub(null);
+  showToast(`Deleted ${n} subtitles`);
+}
+
 export function initSubtitles() {
   const root = $("#subs-panel");
   const model = el("select", {}, Object.keys(MODELS).map((m) => el("option", { value: m }, m)));
@@ -106,7 +115,8 @@ export function initSubtitles() {
       el("button", { onclick: addBlank }, "+ Add subtitle")),
     el("div", { class: "row" },
       el("button", { title: "Import subtitles from an .srt file, e.g. downloaded from YouTube Studio", onclick: () => srtInput.click() }, "Import .srt file"),
-      srtInput),
+      srtInput,
+      el("button", { class: "danger", id: "btn-delete-all-subs", title: "Delete every subtitle in the project", onclick: deleteAll }, "Delete all subtitles")),
     list);
 
   const render = () => {

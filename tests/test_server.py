@@ -566,3 +566,16 @@ def test_export_job_uses_the_chosen_container_and_folder(client, tmp_path):
     assert j["result"]["video"].endswith(".mkv") and j["result"]["dir"] == str(tmp_path / "out here")
     assert j["result"]["downloadable"] is False
     assert os.path.exists(os.path.join(j["result"]["dir"], j["result"]["video"]))
+
+
+def test_cuts_confirmed_is_client_owned_and_reset_by_detection(client, tmp_path):
+    path = make_clip(str(tmp_path / "a.mp4"), SPEC)
+    added = add_clip(client, path)
+    clip_id = added["clip"]["id"]
+    proj = get_project(client)
+    proj["clips"][0]["cuts_confirmed"] = True
+    assert client.put("/api/project", json=proj).status_code == 200
+    assert get_project(client)["clips"][0]["cuts_confirmed"] is True
+    job = client.post(f"/api/clips/{clip_id}/silence", json={}).json()["job"]
+    assert wait_job(client, job)["state"] == "done"
+    assert get_project(client)["clips"][0]["cuts_confirmed"] is False

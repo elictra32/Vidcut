@@ -159,6 +159,7 @@ def create_app(home: str | None = None) -> FastAPI:
                 if known is not None:
                     known.keeps, known.framing = c.keeps, c.framing
                     known.role = c.role if c.role in ROLES else "main"
+                    known.cuts_confirmed = bool(c.cuts_confirmed)
                     clips.append(known)
             proj.clips = clips
             proj.export.out_dir = st.project.export.out_dir  # where files get written is chosen via /api/export-folder
@@ -221,6 +222,7 @@ def create_app(home: str | None = None) -> FastAPI:
             keeps = keeps_from_silences(sil, duration, padding) or [Keep(0.0, duration)]
             with st.lock:
                 st.clip(clip_id).keeps = keeps
+                st.clip(clip_id).cuts_confirmed = False  # fresh detection: ask for review again
                 st.project.rev += 1
                 st.save()
             return {"keeps": [asdict(k) for k in keeps]}
