@@ -38,6 +38,8 @@ try {
   must(tags.join("|") === "Intro for EP 1|Intro for EP 2", "the clip list labels them for EP 1 and EP 2: " + tags.join(" | "));
   // vertical covers need no template: the template picker is hidden, an intro and an outro of 1080x1920 are drawn
   await page.selectOption("#cover-format", "vertical");
+  const opts = await page.$$eval("#cover-title-font option", (o) => o.map((x) => x.value));
+  must(opts.includes("Kanit Medium") && opts.includes("Montserrat") && (await page.$eval("#cover-outro-font", (s) => s.value)) === "Prompt Light", `the font lists are filled (${opts.length} fonts) with the brand fonts selected`);
   must(!(await page.isVisible("#cover-template")) && await page.isVisible("#cover-outro-text"), "the vertical style hides the template picker and offers the back cover");
   await page.fill("#cover-titles", "Vertical One");
   await page.click("#btn-make-covers");

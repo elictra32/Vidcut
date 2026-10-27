@@ -32,17 +32,19 @@ export function initCovers() {
   titles.value = recall("vidcut.coverTitles", "");
   titles.addEventListener("change", () => remember("vidcut.coverTitles", titles.value));
   const replace = el("input", { type: "checkbox", id: "cover-replace", checked: true });
-  const fontSel = (id, value) => {
-    const s = el("select", { id }, getFonts().map((f) => el("option", { value: f, style: `font-family: "${f}"` }, f)));
-    s.value = value;
-    return s;
+  // the font list arrives with the project (after this panel is built), so the options are filled in on every load
+  const titleFont = el("select", { id: "cover-title-font" }), dateFont = el("select", { id: "cover-date-font" }), outroFont = el("select", { id: "cover-outro-font" });
+  const FONT_SELECTS = [[titleFont, "T", "Montserrat"], [dateFont, "D", "Prompt Light"], [outroFont, "O", "Prompt Light"]];
+  for (const [sel, key] of FONT_SELECTS) sel.addEventListener("change", () => remember(`vidcut.coverFont${key}`, sel.value));
+  const fillFonts = () => {
+    const fonts = getFonts();
+    if (!fonts.length) return;
+    for (const [sel, key, fallback] of FONT_SELECTS) {
+      const want = sel.value || recall(`vidcut.coverFont${key}`, "") || fallback;
+      sel.replaceChildren(...fonts.map((f) => el("option", { value: f, style: `font-family: "${f}"` }, f)));
+      sel.value = fonts.includes(want) ? want : fonts.includes(fallback) ? fallback : fonts[0];
+    }
   };
-  const titleFont = fontSel("cover-title-font", "Montserrat"), dateFont = fontSel("cover-date-font", "Prompt Light"), outroFont = fontSel("cover-outro-font", "Prompt Light");
-  for (const [sel, key] of [[titleFont, "T"], [dateFont, "D"], [outroFont, "O"]]) {
-    const saved = recall(`vidcut.coverFont${key}`, "");
-    if (saved && getFonts().includes(saved)) sel.value = saved;
-    sel.addEventListener("change", () => remember(`vidcut.coverFont${key}`, sel.value));
-  }
   const format = el("select", { id: "cover-format" }, el("option", { value: "landscape" }, "Landscape: copy the look of one of your covers"),
     el("option", { value: "vertical" }, "Vertical (TikTok 1080×1920): drawn by Vidcut"));
   format.value = recall("vidcut.coverFormat", "landscape");
@@ -111,7 +113,8 @@ export function initCovers() {
       el("label", { class: "field" }, el("span", {}, "Text of the back cover"), outroFont),
       el("p", { class: "muted small" }, "Each font name is shown in its own style. All of them draw Thai and English.")),
     make);
-  subscribe((why) => (why === "load" || why === "keeps" || why === "edit") && fillTemplates());
+  subscribe((why) => { if (why === "load") fillFonts(); if (why === "load" || why === "keeps" || why === "edit") fillTemplates(); });
   fillTemplates();
+  fillFonts();
   syncFormat();
 }
