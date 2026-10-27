@@ -359,7 +359,7 @@ def create_app(home: str | None = None) -> FastAPI:
         only_selection = bool(body.get("only_selection", True))
         cues = parse_srt(str(body.get("srt_text", "")))
         if not cues:
-            raise AppError("srt_empty", "No subtitles found in this file", "It must be an .srt file (UTF-8), e.g. downloaded from YouTube Studio")
+            raise AppError("srt_empty", "No subtitles found in this file", "It must be an .srt, .vtt or .sbv file (UTF-8), e.g. downloaded from YouTube Studio")
         st.clip(clip_id)  # 404 when unknown
         with st.lock:
             snap = copy.deepcopy(st.project)

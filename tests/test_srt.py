@@ -163,3 +163,17 @@ def test_conversion_selection_across_a_cut_skips_the_removed_cues():
 
 def test_conversion_of_empty_cue_list_is_empty():
     assert convert(cues=[]) == []
+
+
+def test_webvtt_with_header_notes_settings_and_short_times():
+    vtt = ("WEBVTT\n\nNOTE a comment\n\nSTYLE\n::cue { color: red }\n\n"
+           "intro\n00:01.000 --> 00:04.500 align:start position:0%\n<c.yellow>สวัสดี</c> <00:02.000>ครับ\n\n"
+           "1:02:03.250 --> 1:02:05.000\nบรรทัดสอง\nต่อ\n")
+    cues = parse_srt(vtt)
+    assert [(c.start, c.end, c.text) for c in cues] == [(1.0, 4.5, "สวัสดี ครับ"), (3723.25, 3725.0, "บรรทัดสอง\nต่อ")]
+
+
+def test_sbv_blocks():
+    sbv = "0:00:01.000,0:00:03.500\nสวัสดีครับ\n\n0:01:00.000,0:01:02.000\nบรรทัดสอง\nต่อ\n"
+    cues = parse_srt(sbv)
+    assert [(c.start, c.end, c.text) for c in cues] == [(1.0, 3.5, "สวัสดีครับ"), (60.0, 62.0, "บรรทัดสอง\nต่อ")]

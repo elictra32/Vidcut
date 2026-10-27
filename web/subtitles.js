@@ -41,7 +41,7 @@ function openImportDialog(fileName, srtText) {
   const offset = el("input", { type: "number", value: 0, step: 0.1 });
   const dlg = el("dialog", { class: "frame-dialog import-dialog" },
     el("h3", {}, `Import subtitles from ${fileName}`),
-    el("p", { class: "muted small" }, "The SRT must come from the same video you added here (the original, before dead air was cut) for the times to match"),
+    el("p", { class: "muted small" }, "The caption file must come from the same video you added here (the original, before dead air was cut) for the times to match"),
     el("label", { class: "field" }, el("span", {}, "Apply subtitles to clip"), clipSel),
     el("label", { class: "field inline" }, el("span", {}, p.selection ? "Only the selected In/Out range" : "Only the In/Out range (none selected)"), onlySel),
     el("label", { class: "field" }, el("span", {}, "Time shift (seconds): positive = subtitles appear later (use when they show before the voice) · negative = earlier (use when they show after the voice)"), offset),
@@ -123,7 +123,7 @@ export function initSubtitles() {
   const note = el("p", { class: "muted small" }, MODELS[model.value]);
   model.addEventListener("change", () => (remember("vidcut.model", model.value), (note.textContent = MODELS[model.value])));
   const list = el("div", { class: "sub-list" });
-  const srtInput = el("input", { type: "file", id: "srt-file", accept: ".srt,.txt,text/plain", hidden: true });
+  const srtInput = el("input", { type: "file", id: "srt-file", accept: ".srt,.vtt,.sbv,.txt,text/plain", hidden: true });
   srtInput.addEventListener("change", async () => {
     const file = srtInput.files[0];
     srtInput.value = ""; // choosing the same file again must fire 'change' again
@@ -136,7 +136,7 @@ export function initSubtitles() {
       el("button", { class: "primary", onclick: () => generate(model.value) }, "Generate subtitles"),
       el("button", { onclick: addBlank }, "+ Add subtitle")),
     el("div", { class: "row" },
-      el("button", { title: "Import subtitles from an .srt file, e.g. downloaded from YouTube Studio", onclick: () => srtInput.click() }, "Import .srt file"),
+      el("button", { title: "Import subtitles from an .srt, .vtt or .sbv file, e.g. downloaded from YouTube Studio", onclick: () => srtInput.click() }, "Import .srt / .vtt / .sbv file"),
       srtInput,
       el("button", { class: "danger", id: "btn-delete-all-subs", title: "Delete every subtitle in the project", onclick: deleteAll }, "Delete all subtitles")),
     list);

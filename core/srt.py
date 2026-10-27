@@ -1,9 +1,11 @@
-"""SRT parsing (as exported by YouTube Studio and most tools)."""
+"""Caption file parsing: SRT (YouTube Studio and most tools), WebVTT (.vtt) and YouTube's SBV (.sbv)."""
 import html
 import re
 from dataclasses import dataclass
 
-_TIME = re.compile(r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})")
+_T = r"(?:(\d{1,2}):)?(\d{2}):(\d{2})[,.](\d{1,3})"  # hours are optional in WebVTT
+_TIME = re.compile(_T + r"\s*-->\s*" + _T)  # SRT and WebVTT (cue settings after the end time are ignored)
+_SBV = re.compile(r"(\d{1,2}):(\d{2}):(\d{2})\.(\d{1,3}),(\d{1,2}):(\d{2}):(\d{2})\.(\d{1,3})")
 _TAG = re.compile(r"<[^>]+>")
 
 
@@ -15,7 +17,7 @@ class Cue:
 
 
 def _seconds(h, m, s, ms) -> float:
-    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms.ljust(3, "0")) / 1000
+    return int(h or 0) * 3600 + int(m) * 60 + int(s) + int(ms.ljust(3, "0")) / 1000
 
 
 def parse_srt(text: str) -> list[Cue]:
@@ -25,7 +27,7 @@ def parse_srt(text: str) -> list[Cue]:
     for block in re.split(r"\n\s*\n", text.strip()):
         lines = block.split("\n")
         for i, line in enumerate(lines):
-            m = _TIME.search(line)
+            m = _TIME.search(line) or _SBV.fullmatch(line.strip())
             if m:
                 break
         else:
