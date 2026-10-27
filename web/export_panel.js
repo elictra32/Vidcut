@@ -1,4 +1,5 @@
 import { api, ApiError } from "./api.js";
+import { addToQueue } from "./queue_panel.js";
 import { flush, getPresets, getProject, saveFailed, setUi, subscribe, ui, update, withSavedProject } from "./state.js";
 import { trackJob } from "./status.js";
 import { showError } from "./toast.js";
@@ -131,7 +132,8 @@ export function initExportPanel() {
     el("label", { class: "field" }, el("span", {}, "File type"), container),
     el("label", { class: "field" }, el("span", {}, "Quality / size"), quality), targetRow, folderRow, estimate,
     el("label", { class: "field inline" }, el("span", {}, "Show app UI safe zone"), safe),
-    el("div", { class: "row" }, el("button", { onclick: checkFrame }, "Check real frame"), exportBtn), result);
+    el("div", { class: "row" }, el("button", { onclick: checkFrame }, "Check real frame"), exportBtn,
+      el("button", { id: "btn-queue-export", title: "Add this export to the queue instead of running it now", onclick: () => addToQueue("export") }, "Add to queue")), result);
 
   const render = () => {
     const p = getProject();

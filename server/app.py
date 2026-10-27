@@ -41,6 +41,7 @@ from core.timeline import main_clips
 from core.waveform import loudness_by_second, waveform_peaks
 from server import fake_whisper
 from server.errors import AppError, from_exception, payload
+from server.jobqueue import JobQueue
 from server.jobs import JobRunner
 from server.project_store import default_home, load_project, save_project
 
@@ -147,6 +148,11 @@ def create_app(home: str | None = None) -> FastAPI:
             return {"project": project_to_dict(st.project),
                     "presets": {k: asdict(v) for k, v in PRESETS.items()},
                     "fonts": list(FONT_FILES)}
+
+    @app.post("/api/project/beacon")
+    def post_project_beacon(body: dict):
+        """The same save as PUT, for navigator.sendBeacon when the page is closing (beacons can only POST)."""
+        return put_project(body)
 
     @app.put("/api/project")
     def put_project(body: dict):
@@ -475,13 +481,7 @@ def create_app(home: str | None = None) -> FastAPI:
                 st.save()
             snap = copy.deepcopy(st.project)
 
-        out_dir = snap.export.out_dir or st.exports
-
-        def work(progress, cancel):
-            res = run_export(snap, out_dir, progress, cancel)
-            return {"video": os.path.basename(res.video), "srt": os.path.basename(res.srt), "dir": out_dir,
-                    "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
-        return {"job": st.jobs.submit(work, "export")}
+        return {"job": st.jobs.submit(lambda progress, cancel: run_single_export(snap, progress, cancel), "export")}
 
     # ---- episode covers made from the THUS intro template ------------------------------------------
     @app.post("/api/covers")
@@ -569,6 +569,126 @@ def create_app(home: str | None = None) -> FastAPI:
         return {"index": e.index, "start": e.start, "end": e.end, "duration": e.duration, "intro_clip_id": e.intro_clip_id,
                 "video_kbps": e.video_kbps, "est_bytes": e.est_bytes}
 
+    def prepare_episodes(snap: Project, max_mb: float, chosen):
+        """The episode plan for `snap`, with the page's own intro choices applied (one clip id per episode)."""
+        eps, _ = episode_plan(snap, max_mb)
+        if chosen is not None:
+            valid = {c.id for c in snap.clips if c.role == "intro"}
+            if len(chosen) != len(eps) or any(i not in valid for i in chosen if i):
+                raise AppError("intro_choice_invalid", "The intro choice doesn't match the episodes", "Plan the episodes again")
+            for e, i in zip(eps, chosen):
+                e.intro_clip_id = i or None
+        snap.export.quality = "auto"  # constant quality, capped per episode so each stays under the limit
+        return eps
+
+    def run_single_export(snap: Project, progress, cancel) -> dict:
+        out_dir = snap.export.out_dir or st.exports
+        res = run_export(snap, out_dir, progress, cancel)
+        return {"video": os.path.basename(res.video), "srt": os.path.basename(res.srt), "dir": out_dir,
+                "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
+
+    def run_episode_set(snap: Project, eps, max_mb: float, progress, cancel) -> dict:
+        out_dir = snap.export.out_dir or st.exports
+        files = []
+        total = sum(e.duration for e in eps)
+        done = 0.0
+        for e in eps:
+            base, span = done / total, e.duration / total
+
+            def report(f, m="", base=base, span=span, e=e):
+                progress(base + span * f, f"Episode {e.index}/{len(eps)} · {m}" if m else f"Episode {e.index}/{len(eps)}")
+            res = run_export(snap, out_dir, report, cancel, selection=Selection(e.start, e.end),
+                             intro_ids=[e.intro_clip_id] if e.intro_clip_id else None,
+                             name_suffix=f"_EP{e.index:02d}", max_video_kbps=e.video_kbps)
+            size = os.path.getsize(res.video)
+            files.append({"video": os.path.basename(res.video), "bytes": size, "over_limit": size > max_mb * 1048576})
+            done += e.duration
+        return {"files": files, "dir": out_dir, "limit_mb": max_mb,
+                "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
+
+    # ---- the job queue: long jobs that run one after another and survive closing the app ------------
+    def queue_export(project_dict: dict, params: dict, progress, cancel) -> dict:
+        return run_single_export(project_from_dict(project_dict), progress, cancel)
+
+    def queue_episodes(project_dict: dict, params: dict, progress, cancel) -> dict:
+        snap = project_from_dict(project_dict)
+        max_mb = float(params.get("max_mb", 500))
+        return run_episode_set(snap, prepare_episodes(snap, max_mb, params.get("intro_ids")), max_mb, progress, cancel)
+
+    st.queue = JobQueue(st.home, {"export": queue_export, "episodes": queue_episodes},
+                        busy=lambda: st.jobs.active(ignore=("proxy",)) > 0)
+    st.queue.start()  # items left over from the last run (when the app was closed) continue now
+
+    def describe(snap: Project) -> str:
+        names = [os.path.basename(c.path) for c in snap.clips if c.role == "main"]
+        what = names[0] if len(names) == 1 else f"{len(names)} clips" if names else "project"
+        if snap.selection:
+            m = lambda t: f"{int(t // 60)}:{int(t % 60):02d}"
+            return f"{what} · {m(snap.selection.start)}–{m(snap.selection.end)}"
+        return f"{what} · whole timeline"
+
+    @app.get("/api/queue")
+    def get_queue():
+        return st.queue.snapshot()
+
+    @app.post("/api/queue")
+    def post_queue(body: dict):
+        kind = str(body.get("kind", ""))
+        if kind not in ("export", "episodes"):
+            raise AppError("queue_invalid", "This can't be queued", "Only exports and episode batches can be queued")
+        params = dict(body.get("params") or {})
+        preset = params.get("preset")
+        if preset is not None and preset not in PRESETS:
+            raise AppError("preset_unknown", "Unknown preset")
+        with st.lock:
+            snap = copy.deepcopy(st.project)
+        if preset:
+            snap.preset = preset
+        if not snap.clips:
+            raise AppError("no_clips", "No clips in the project", "Add a clip first")
+        if kind == "export":
+            try:
+                export_duration(snap)  # refuse an unusable selection now, not when its turn comes
+            except ValueError as e:
+                raise from_exception(e) from e
+            label = f"Export · {describe(snap)}"
+        else:
+            prepare_episodes(copy.deepcopy(snap), float(params.get("max_mb", 500)), params.get("intro_ids"))  # validates now
+            label = f"Episodes (≤ {float(params.get('max_mb', 500)):g} MB) · {describe(snap)}"
+        return st.queue.add(kind, label, params, project_to_dict(snap))
+
+    @app.post("/api/queue/pause")
+    def post_queue_pause():
+        st.queue.set_paused(True)
+        return st.queue.snapshot()
+
+    @app.post("/api/queue/resume")
+    def post_queue_resume():
+        st.queue.set_paused(False)
+        return st.queue.snapshot()
+
+    @app.post("/api/queue/clear-finished")
+    def post_queue_clear():
+        return {"removed": st.queue.clear_finished()}
+
+    @app.post("/api/queue/{item_id}/cancel")
+    def post_queue_cancel(item_id: str):
+        if not st.queue.cancel(item_id):
+            raise AppError("queue_item_not_found", "That queue item can't be cancelled", status=404)
+        return {"ok": True}
+
+    @app.post("/api/queue/{item_id}/move")
+    def post_queue_move(item_id: str, body: dict):
+        if not st.queue.move(item_id, -1 if int(body.get("delta", 0)) < 0 else 1):
+            raise AppError("queue_item_not_found", "That item can't be moved", status=404)
+        return {"ok": True}
+
+    @app.delete("/api/queue/{item_id}")
+    def delete_queue_item(item_id: str):
+        if not st.queue.remove(item_id):
+            raise AppError("queue_item_not_found", "That item can't be removed (a running one must be cancelled first)", status=404)
+        return {"ok": True}
+
     @app.post("/api/episodes/plan")
     def post_episodes_plan(body: dict | None = None):
         max_mb = float((body or {}).get("max_mb", 500))
@@ -584,35 +704,8 @@ def create_app(home: str | None = None) -> FastAPI:
         max_mb = float((body or {}).get("max_mb", 500))
         with st.lock:
             snap = copy.deepcopy(st.project)
-        eps, _ = episode_plan(snap, max_mb)
-        chosen = (body or {}).get("intro_ids")  # the page lets the user pick each episode's intro
-        if chosen is not None:
-            valid = {c.id for c in snap.clips if c.role == "intro"}
-            if len(chosen) != len(eps) or any(i not in valid for i in chosen if i):
-                raise AppError("intro_choice_invalid", "The intro choice doesn't match the episodes", "Plan the episodes again")
-            for e, i in zip(eps, chosen):
-                e.intro_clip_id = i or None
-        snap.export.quality = "auto"  # constant quality, capped per episode so each stays under the limit
-        out_dir = snap.export.out_dir or st.exports
-
-        def work(progress, cancel):
-            files = []
-            total = sum(e.duration for e in eps)
-            done = 0.0
-            for e in eps:
-                base, span = done / total, e.duration / total
-
-                def report(f, m="", base=base, span=span, e=e):
-                    progress(base + span * f, f"Episode {e.index}/{len(eps)} · {m}" if m else f"Episode {e.index}/{len(eps)}")
-                res = run_export(snap, out_dir, report, cancel, selection=Selection(e.start, e.end),
-                                 intro_ids=[e.intro_clip_id] if e.intro_clip_id else None,
-                                 name_suffix=f"_EP{e.index:02d}", max_video_kbps=e.video_kbps)
-                size = os.path.getsize(res.video)
-                files.append({"video": os.path.basename(res.video), "bytes": size, "over_limit": size > max_mb * 1048576})
-                done += e.duration
-            return {"files": files, "dir": out_dir, "limit_mb": max_mb,
-                    "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
-        return {"job": st.jobs.submit(work, "export")}
+        eps = prepare_episodes(snap, max_mb, (body or {}).get("intro_ids"))
+        return {"job": st.jobs.submit(lambda progress, cancel: run_episode_set(snap, eps, max_mb, progress, cancel), "export")}
 
     def set_export_folder(path: str) -> dict:
         path = path.strip().strip('"')

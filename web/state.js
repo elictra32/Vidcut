@@ -198,6 +198,17 @@ export async function reloadAfterJob(keepSelectionFrom = null) {
   }
 }
 
+// Closing the tab or the browser: send whatever has not been saved yet with a beacon, which the browser delivers even
+// while the page is going away (a normal request may be cancelled).
+function saveOnClose() {
+  if (!project || !dirty) return;
+  try {
+    navigator.sendBeacon("/api/project/beacon", new Blob([JSON.stringify(project)], { type: "application/json" }));
+  } catch { /* nothing more can be done while closing */ }
+}
+window.addEventListener("pagehide", saveOnClose);
+document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && saveOnClose());
+
 export function setCurrentClip(id) {
   ui.currentClipId = id;
   notify("clip");

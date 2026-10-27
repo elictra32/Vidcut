@@ -832,3 +832,69 @@ def test_covers_validate_their_input(client, tmp_path):
     assert client.post("/api/covers", json={"template_path": tpl, "date": "garbage", "items": [{"title": "x"}]}).json()["error"]["code"] == "covers_invalid"
     bad = client.post("/api/covers", json={"template_path": make_clip(str(tmp_path / "s.mp4"), [("tone", 3)], size="320x180"), "items": [{"title": "x"}]}).json()["job"]
     assert wait_job(client, bad)["error"]["code"] == "template_mismatch"
+
+
+# ---- the job queue over HTTP --------------------------------------------------------------------------------------
+def wait_queue(client, cond, timeout=120):
+    end = time.time() + timeout
+    while time.time() < end:
+        q = client.get("/api/queue").json()
+        if cond(q):
+            return q
+        time.sleep(0.2)
+    raise AssertionError("queue did not reach the expected state: " + json.dumps(client.get("/api/queue").json())[:400])
+
+
+def test_queue_exports_run_in_order_from_frozen_snapshots(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "q.mp4"), [("tone", 6)], size="320x180"))
+    out = str(tmp_path / "qout")
+    client.post("/api/export-folder", json={"path": out})
+    client.post("/api/queue/pause")
+    put_project(client, selection={"start": 0, "end": 2})
+    a = client.post("/api/queue", json={"kind": "export"}).json()
+    put_project(client, selection={"start": 3, "end": 6})           # a later edit must not change item a
+    b = client.post("/api/queue", json={"kind": "export"}).json()
+    assert a["label"].startswith("Export · q.mp4 · 0:00–0:02") and b["label"].startswith("Export · q.mp4 · 0:03–0:06")
+    listing = client.get("/api/queue").json()
+    assert listing["paused"] and [i["state"] for i in listing["items"]] == ["queued", "queued"]
+    assert all("project" not in i for i in listing["items"])
+    client.post("/api/queue/resume")
+    q = wait_queue(client, lambda q: all(i["state"] == "done" for i in q["items"]))
+    durs = [media.probe(os.path.join(out, i["result"]["video"]))["duration"] for i in q["items"]]
+    assert durs[0] == pytest.approx(2.0, abs=0.3) and durs[1] == pytest.approx(3.0, abs=0.3)
+    assert client.post("/api/queue/clear-finished").json()["removed"] == 2
+
+
+def test_queue_validates_when_adding_not_when_running(client, tmp_path):
+    assert client.post("/api/queue", json={"kind": "export"}).json()["error"]["code"] == "no_clips"
+    add_clip(client, make_clip(str(tmp_path / "v.mp4"), [("tone", 4)], size="320x180"))
+    assert client.post("/api/queue", json={"kind": "whatever"}).json()["error"]["code"] == "queue_invalid"
+    put_project(client, selection={"start": 3, "end": 2})
+    assert client.post("/api/queue", json={"kind": "export"}).json()["error"]["code"] in ("selection_invalid", "internal")
+    assert client.post("/api/queue/nope/cancel").status_code == 404
+    assert client.delete("/api/queue/nope").status_code == 404
+
+
+def test_queue_survives_restarting_the_app(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIDCUT_PICK_OVERRIDE", raising=False)
+    home = str(tmp_path / "home")
+    c1 = TestClient(create_app(home=home), base_url="http://127.0.0.1:8765")
+    add_clip(c1, make_clip(str(tmp_path / "r.mp4"), [("tone", 4)], size="320x180"))
+    c1.post("/api/export-folder", json={"path": str(tmp_path / "rout")})
+    c1.post("/api/queue/pause")
+    c1.post("/api/queue", json={"kind": "export"})
+    # "close the app" and open it again on the same folder
+    c2 = TestClient(create_app(home=home), base_url="http://127.0.0.1:8765")
+    q = c2.get("/api/queue").json()
+    assert q["paused"] and len(q["items"]) == 1 and q["items"][0]["state"] == "queued"
+    c2.post("/api/queue/resume")
+    done = wait_queue(c2, lambda q: q["items"][0]["state"] == "done")
+    assert os.path.exists(os.path.join(str(tmp_path / "rout"), done["items"][0]["result"]["video"]))
+
+
+def test_beacon_saves_like_put(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "b.mp4"), [("tone", 3)], size="320x180"))
+    p = get_project(client)
+    p["selection"] = {"start": 0.5, "end": 1.5}
+    assert client.post("/api/project/beacon", json=p).status_code == 200
+    assert get_project(client)["selection"] == {"start": 0.5, "end": 1.5}

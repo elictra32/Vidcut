@@ -28,9 +28,10 @@ class JobRunner:
         (self._proxy_pool if pool == "proxy" else self._pool).submit(self._run, jid, fn, cancel)
         return jid
 
-    def active(self) -> int:
+    def active(self, ignore: tuple = ()) -> int:
+        """Jobs not finished yet, except those whose name is in `ignore` (e.g. the long preview-proxy jobs)."""
         with self._cond:
-            return sum(1 for j in self._jobs.values() if j["state"] not in TERMINAL)
+            return sum(1 for j in self._jobs.values() if j["state"] not in TERMINAL and j["name"] not in ignore)
 
     def _update(self, jid, **kw):
         with self._cond:

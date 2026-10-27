@@ -1,6 +1,7 @@
 // Split into episodes: the fewest files that each stay under a size limit; own intro per episode, shared outro.
 import { api } from "./api.js";
 import { getProject, withSavedProject } from "./state.js";
+import { addToQueue } from "./queue_panel.js";
 import { trackJob } from "./status.js";
 import { showError } from "./toast.js";
 import { $, el, fmtTime, recall, remember } from "./util.js";
@@ -70,5 +71,9 @@ export function initEpisodes() {
     el("h2", {}, "Split into episodes"),
     el("p", { class: "muted small" }, "Cuts the timeline (or your In/Out range) into the fewest files that each fit the size limit, at dead-air cuts. Each episode gets its own intro clip (in order); the outro is the same for all."),
     el("label", { class: "field" }, el("span", {}, "Max size per episode (MB)"), limit),
-    el("div", { class: "row" }, planBtn, exportBtn), out);
+    el("div", { class: "row" }, planBtn, exportBtn,
+      el("button", { id: "btn-queue-eps", title: "Add all episodes to the queue instead of running them now", onclick: async () => {
+        const r = planned && planned.limit === +limit.value ? planned.r : await plan();
+        if (r) addToQueue("episodes", { max_mb: +limit.value, ...(picks.length ? { intro_ids: picks } : {}) });
+      } }, "Add to queue")), out);
 }

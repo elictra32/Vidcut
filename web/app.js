@@ -14,6 +14,7 @@ import { initOverlays } from "./overlays.js";
 import { initEpisodes } from "./episodes.js";
 import { initHighlights } from "./highlights.js";
 import { initCovers } from "./covers.js";
+import { initQueuePanel } from "./queue_panel.js";
 import { $ } from "./util.js";
 
 async function main() {
@@ -30,6 +31,8 @@ async function main() {
   initOverlays();
   initExportPanel();
   initEpisodes();
+  initQueuePanel();
+  $("#btn-queue").addEventListener("click", () => $("#queue-panel").scrollIntoView({ behavior: "smooth", block: "start" }));
   $("#btn-add").addEventListener("click", addClipFromDialog);
   const syncHistory = () => { $("#btn-undo").disabled = !canUndo(); $("#btn-redo").disabled = !canRedo(); };
   $("#btn-undo").addEventListener("click", undo);

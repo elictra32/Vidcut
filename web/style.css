@@ -162,3 +162,10 @@ button.danger { color: #ff8a8a; }
 .numslider .num { width: 64px; }
 .field > .numslider { width: 100%; }
 .sub-tools .num { width: 56px; }
+.badge { display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 8px; background: var(--accent, #2dd4a7); color: #04201a; font-size: 11px; text-align: center; }
+.badge[hidden] { display: none; }
+.q-item { border-top: 1px solid var(--border, #333); padding: 6px 0; }
+.q-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.q-error { color: #ff8a8a; }
+.q-item progress { width: 100%; }
+.q-cancelled .q-label, .q-done .q-label { opacity: 0.7; }

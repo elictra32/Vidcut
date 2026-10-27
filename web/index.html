@@ -12,6 +12,7 @@
     <button id="btn-add" class="primary">+ Add clip</button>
     <button id="btn-undo" class="ghost" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
     <button id="btn-redo" class="ghost" title="Redo (Ctrl+Y or Ctrl+Shift+Z)" disabled>↷ Redo</button>
+    <button id="btn-queue" class="ghost" title="Show the job queue">Queue <span id="queue-badge" class="badge" hidden></span></button>
     <details class="path-add">
       <summary>Paste a file path instead</summary>
       <input id="path-input" placeholder="C:\Videos\clip.mp4" size="36">
@@ -43,6 +44,7 @@
     </section>
     <aside class="right">
       <section id="style-panel" class="panel"></section>
+      <section id="queue-panel" class="panel"></section>
       <section id="overlay-panel" class="panel"></section>
       <section id="export-panel" class="panel"></section>
       <section id="episodes-panel" class="panel"></section>
