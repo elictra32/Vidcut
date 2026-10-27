@@ -19,9 +19,80 @@ export const getFonts = () => fonts;
 export const subscribe = (fn) => (listeners.add(fn), () => listeners.delete(fn));
 const notify = (why) => listeners.forEach((f) => f(why));
 
+// ---- undo / redo ------------------------------------------------------------------------------------
+// A snapshot holds what the PAGE owns (see PUT /api/project): cut keeps, framing, roles, subtitles, style, selection,
+// overlay placement, export options. Media files and the server's own bookkeeping are never restored.
+const MAX_HISTORY = 100;
+const GROUP_MS = 800; // edits of one kind this close together (typing, dragging a slider) undo as one step
+const undoStack = [];
+const redoStack = [];
+let lastEdit = { why: null, at: 0 };
+
+const snapshot = () => project && structuredClone({
+  clips: project.clips.map((c) => ({ id: c.id, keeps: c.keeps, framing: c.framing, role: c.role, cuts_confirmed: c.cuts_confirmed })),
+  subtitles: project.subtitles, style: project.style, selection: project.selection, preset: project.preset,
+  overlays: project.overlays, export: { container: project.export.container, quality: project.export.quality, target_mb: project.export.target_mb },
+});
+
+function pushUndo(snap) {
+  if (!snap) return;
+  undoStack.push(snap);
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack.length = 0;
+  notify("history");
+}
+
+function restore(snap) {
+  for (const s of snap.clips) {
+    const c = project.clips.find((x) => x.id === s.id);
+    if (c) Object.assign(c, { keeps: s.keeps, framing: s.framing, role: s.role, cuts_confirmed: s.cuts_confirmed });
+  }
+  const ids = new Set(project.clips.map((c) => c.id));
+  project.subtitles = snap.subtitles.filter((s) => ids.has(s.clip_id));
+  project.style = snap.style;
+  project.selection = snap.selection;
+  project.preset = snap.preset;
+  for (const o of snap.overlays) {
+    const cur = project.overlays.find((x) => x.id === o.id);
+    if (cur) Object.assign(cur, { x: o.x, y: o.y, width: o.width, opacity: o.opacity, start: o.start, end: o.end });
+  }
+  Object.assign(project.export, snap.export);
+  lastEdit = { why: null, at: 0 };
+  notify("undo");
+  dirty = true;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => flush().catch(() => {}), 400);
+}
+
+export const canUndo = () => undoStack.length > 0;
+export const canRedo = () => redoStack.length > 0;
+
+export function undo() {
+  if (!undoStack.length) return false;
+  redoStack.push(snapshot());
+  restore(undoStack.pop());
+  notify("history");
+  return true;
+}
+
+export function redo() {
+  if (!redoStack.length) return false;
+  undoStack.push(snapshot());
+  restore(redoStack.pop());
+  notify("history");
+  return true;
+}
+
 export async function loadProject() {
+  const before = snapshot();
   const r = await api("GET", "/api/project");
   project = r.project;
+  // something changed on the server (a finished job, an import): make that undoable too
+  if (before && JSON.stringify(before) !== JSON.stringify(snapshot())) {
+    undoStack.push(before);
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    redoStack.length = 0;
+  }
   presets = r.presets ?? {};
   fonts = r.fonts ?? [];
   if (!project.clips.some((c) => c.id === ui.currentClipId)) ui.currentClipId = project.clips[0]?.id ?? null;
@@ -30,6 +101,9 @@ export async function loadProject() {
 
 /** Mutate the project in place, notify, and save (debounced). */
 export function update(mutator, why = "edit") {
+  const now = Date.now();
+  if (why !== "select" && why !== "ui" && (why !== lastEdit.why || now - lastEdit.at > GROUP_MS)) pushUndo(snapshot());
+  lastEdit = { why, at: now };
   mutator(project);
   notify(why);
   dirty = true;
