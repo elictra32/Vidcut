@@ -94,7 +94,7 @@ def _default_style() -> SubtitleStyle:
 @dataclass
 class ExportSettings:
     container: str = "mp4"  # mp4 | mov | mkv | webm
-    quality: str = "medium"  # high | medium | small | custom (custom uses target_mb)
+    quality: str = "auto"  # auto | high | medium | small | custom (auto = constant quality, capped; custom uses target_mb)
     target_mb: float | None = None
     out_dir: str = ""  # "" = the default exports folder; set by the server only
 

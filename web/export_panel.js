@@ -56,7 +56,7 @@ export function initExportPanel() {
   const container = el("select", { id: "opt-container" },
     option("mp4", "MP4 (plays everywhere, recommended)"), option("mov", "MOV"), option("mkv", "MKV"), option("webm", "WebM (slower to encode)"));
   const quality = el("select", { id: "opt-quality" },
-    option("high", "High quality (large file)"), option("medium", "Medium quality"), option("small", "Small file"), option("custom", "Custom size"));
+    option("auto", "Best value (keeps the look, smallest file)"), option("high", "High quality (large file)"), option("medium", "Medium quality"), option("small", "Small file"), option("custom", "Custom size"));
   const target = el("input", { type: "number", id: "opt-target", min: 1, step: 1 });
   const targetRow = el("label", { class: "field" }, el("span", {}, "Target file size (MB)"), target);
   const folderText = el("span", { class: "folder-text small" });
@@ -97,7 +97,7 @@ export function initExportPanel() {
         const mb = r.bytes / 1048576;
         const parts = [extrasSeconds(p, "intro") && `Intro ${fmtTime(extrasSeconds(p, "intro"))}`, `Content ${fmtTime(p.selection ? p.selection.end - p.selection.start : tm.editedDuration(p.clips))}`,
           extrasSeconds(p, "outro") && `Outro ${fmtTime(extrasSeconds(p, "outro"))}`].filter(Boolean).join(" + ");
-        estimate.textContent = `Length ${fmtTime(r.seconds)} (${parts}) · approx. size ${mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)} MB (±15%) · video ${(r.video_kbps / 1000).toFixed(1)} Mbps`;
+        estimate.textContent = `Length ${fmtTime(r.seconds)} (${parts}) · ${r.upper_bound ? "up to" : "approx."} size ${mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)} MB (±15%) · video ${(r.video_kbps / 1000).toFixed(1)} Mbps`;
       } catch (e) {
         if (seq === estimateSeq) estimate.textContent = e.payload?.code === "selection_invalid" ? "Can't estimate size: the selection is invalid" : "";
       }

@@ -3,7 +3,7 @@ predictable before encoding), or a bitrate derived from a target size in MB."""
 from core.models import ExportSettings
 
 CONTAINERS = ("mp4", "mov", "mkv", "webm")
-QUALITIES = ("high", "medium", "small", "custom")
+QUALITIES = ("auto", "high", "medium", "small", "custom")
 # video kbps per output frame size: TikTok is 1080x1920, YouTube 1920x1080
 QUALITY_KBPS = {
     "tiktok": {"high": 8000, "medium": 5000, "small": 3000},
@@ -27,7 +27,8 @@ def output_extension(s: ExportSettings) -> str:
 
 # A re-encode can't add detail the source never had: spending 8 Mbps on a 1.8 Mbps phone clip only makes
 # a bigger file. So each quality level is a share of the source bitrate, capped by the table above.
-SOURCE_SHARE = {"high": 1.2, "medium": 0.8, "small": 0.5}
+SOURCE_SHARE = {"auto": 1.2, "high": 1.2, "medium": 0.8, "small": 0.5}
+AUTO_CRF = {"x264": 22, "vp9": 33}  # constant-quality level for "auto": visually close to a decent source
 MIN_CAPPED_KBPS = 800
 
 
@@ -53,7 +54,7 @@ def video_kbps(s: ExportSettings, preset_name: str, duration: float, source_kbps
         stream_bytes = s.target_mb * 1048576 / CONTAINER_OVERHEAD
         return max(MIN_VIDEO_KBPS, round(stream_bytes * 8 / duration / 1000 - AUDIO_KBPS[s.container]))
     quality = "medium" if s.quality == "custom" else s.quality
-    kbps = table[quality]
+    kbps = table["high" if quality == "auto" else quality]
     if source_kbps:
         kbps = min(kbps, max(MIN_CAPPED_KBPS, round(source_kbps * SOURCE_SHARE[quality])))
     return kbps
@@ -74,6 +75,13 @@ def encoder_args(s: ExportSettings, preset_name: str, duration: float, source_kb
     s = _normalized(s)
     v = video_kbps(s, preset_name, duration, source_kbps)
     rate = ["-b:v", f"{v}k", "-maxrate", f"{round(v * 1.25)}k", "-bufsize", f"{v * 2}k"]
+    if s.quality == "auto":
+        # constant quality: easy footage (a talking head, slides) takes far fewer bits than the cap, which only
+        # stops busy scenes from running away.
+        crf = AUTO_CRF["vp9" if s.container == "webm" else "x264"]
+        rate = ["-crf", str(crf), "-maxrate", f"{v}k", "-bufsize", f"{v * 2}k"]
+        if s.container == "webm":
+            rate = ["-b:v", f"{v}k", *rate]
     if s.container == "webm":
         return ["-c:v", "libvpx-vp9", *rate, "-deadline", "good", "-cpu-used", "4", "-row-mt", "1", "-pix_fmt", "yuv420p",
                 "-c:a", "libopus", "-b:a", f"{AUDIO_KBPS['webm']}k"]

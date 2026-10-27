@@ -103,3 +103,14 @@ def test_source_video_kbps_from_file_size(tmp_path):
     c = Clip("c", str(f), 10.0, 100, 100, 25, True)
     assert abs(source_video_kbps([c]) - (1_000_000 * 8 / 10 / 1000 - 128)) < 1
     assert source_video_kbps([]) is None
+
+
+def test_auto_is_constant_quality_capped_by_the_source():
+    s = ExportSettings(quality="auto")
+    a = encoder_args(s, "tiktok", 60, source_kbps=1800)
+    assert a[a.index("-crf") + 1] == "22"
+    assert a[a.index("-maxrate") + 1] == "2160k"  # never more than 120% of the source
+    assert "-b:v" not in a
+    w = encoder_args(ExportSettings(container="webm", quality="auto"), "tiktok", 60, source_kbps=1800)
+    assert "-crf" in w and "-b:v" in w and "libvpx-vp9" in w
+    assert ExportSettings().quality == "auto"

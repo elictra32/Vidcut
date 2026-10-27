@@ -106,7 +106,7 @@ try {
   await page.selectOption("#opt-quality", "custom");
   must(await page.isVisible("#opt-target"), "the target-size box shows for Custom size");
   await page.selectOption("#opt-quality", "small");
-  await page.waitForFunction(() => /MB/.test(document.querySelector("#estimate")?.textContent ?? ""), null, { timeout: 10000 });
+  await page.waitForFunction(() => /approx\. size.*MB/.test(document.querySelector("#estimate")?.textContent ?? ""), null, { timeout: 10000 });
   must(/approx\. size/.test(await page.$eval("#estimate", (e) => e.textContent)), "the export panel shows a size estimate");
   await page.click("#opt-folder-pick");
   await page.waitForFunction(() => document.querySelector(".folder-text")?.textContent.includes("picked-folder"), null, { timeout: 10000 });

@@ -347,7 +347,8 @@ def create_app(home: str | None = None) -> FastAPI:
         src = source_video_kbps(snap.clips)
         return {"seconds": seconds, "bytes": estimate_bytes(s, snap.preset, seconds, src),
                 "video_kbps": video_kbps(s, snap.preset, seconds, src), "audio_kbps": AUDIO_KBPS[s.container],
-                "source_kbps": round(src) if src else None}
+                "source_kbps": round(src) if src else None,
+                "upper_bound": s.quality == "auto"}
 
     @app.post("/api/preview-frame")
     def post_preview_frame(body: dict):

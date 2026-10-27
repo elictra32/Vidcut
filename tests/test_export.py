@@ -316,3 +316,13 @@ def test_export_to_a_chosen_folder_with_spaces_and_thai(tmp_path):
     target = tmp_path / "โฟลเดอร์ ส่งออก" / "งาน 1"
     res = run_export(real_project(p, sel=(0, 2)), str(target))
     assert os.path.dirname(res.video) == str(target) and os.path.exists(res.srt)
+
+
+def test_auto_quality_export_of_easy_footage_is_far_below_the_cap(tmp_path):
+    from core.encode import video_kbps
+    from core.models import ExportSettings
+    path = make_clip(str(tmp_path / "e.mp4"), [("tone", 6)], size="640x360")
+    proj = Project(clips=[Clip("c1", path, 6, 640, 360, 25, True, keeps=[Keep(0, 6)])], export=ExportSettings(quality="auto"))
+    res = run_export(proj, str(tmp_path / "out"))
+    kbps = os.path.getsize(res.video) * 8 / 6 / 1000
+    assert kbps < video_kbps(ExportSettings(quality="auto"), "tiktok", 6) * 0.5
