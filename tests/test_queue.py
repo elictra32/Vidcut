@@ -157,3 +157,24 @@ def test_unknown_kind_is_refused(tmp_path):
     q = JobQueue(str(tmp_path), {})
     with pytest.raises(KeyError):
         q.add("nope", "x", {}, {})
+
+
+def test_snapshot_says_when_items_wait_only_because_another_job_is_busy(tmp_path):
+    busy = {"on": True}
+    gate = Gate()
+    q = JobQueue(str(tmp_path), {"export": gate.run}, busy=lambda: busy["on"], poll=0.02)
+    q.start()
+    try:
+        q.add("export", "one", {"n": 1}, {"clips": []})
+        time.sleep(0.2)
+        snap = q.snapshot()
+        assert snap["blocked"] is True and snap["running"] is False                  # waiting for the other job
+        q.set_paused(True)
+        assert q.snapshot()["blocked"] is False                                       # paused is a different reason
+        q.set_paused(False)
+        busy["on"] = False
+        assert gate.started.wait(5)
+        assert q.snapshot()["blocked"] is False and q.snapshot()["running"] is True
+    finally:
+        gate.release.set()
+        q.stop()

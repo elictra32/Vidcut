@@ -163,7 +163,7 @@ def check_template(path: str, p: Profile = THUS) -> None:
 
 
 def render_cover(template: str, title: str, date_text: str, out_path: str, *, title_font: str = "Montserrat",
-                 date_font: str = "Prompt Light", profile: Profile = THUS, cancel=None) -> str:
+                 date_font: str = "Prompt Light", profile: Profile = THUS, cancel=None, still_at: float | None = None) -> str:
     if not title.strip():
         raise CoverError("title_empty", "Type the episode title first")
     for f in (title_font, date_font):
@@ -192,10 +192,14 @@ def render_cover(template: str, title: str, date_text: str, out_path: str, *, ti
             f"[bg][b1]overlay=x={bx}:y={by}:enable='lt(t,{profile.poster_until})'[v1]",
             f"[v1][ba]overlay=x='{cx}+(w/{bw})*({bx}-{cx})':y='{cy}+(w/{bw})*({by}-{cy})':enable='between(t,{a0},{profile.end})':format=auto[v2]",
             "[v2]ass=cover.ass:fontsdir=fonts:shaping=complex,format=yuv420p[v]"])
-        tmp = os.path.join(wd, "out.mp4")
-        _run(["-i", template, "-loop", "1", "-framerate", str(FPS), "-t", f"{profile.end}", "-i", os.path.join(wd, "badge_raw.png"),
-              "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "14",
-              "-r", str(FPS), "-c:a", "aac", "-b:a", "192k", "-shortest", tmp], cancel, cwd=wd)
+        tmp = os.path.join(wd, "out.png" if still_at is not None else "out.mp4")
+        src = ["-i", template, "-loop", "1", "-framerate", str(FPS), "-t", f"{profile.end}", "-i", os.path.join(wd, "badge_raw.png"),
+               "-filter_complex", graph]
+        if still_at is not None:   # one PNG of that moment: a quick preview
+            _run(src + ["-map", "[v]", "-ss", f"{min(max(still_at, 0.0), profile.end - 0.1)}", "-frames:v", "1", tmp], cancel, cwd=wd)
+        else:
+            _run(src + ["-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "14",
+                        "-r", str(FPS), "-c:a", "aac", "-b:a", "192k", "-shortest", tmp], cancel, cwd=wd)
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         shutil.move(tmp, out_path)
         return out_path

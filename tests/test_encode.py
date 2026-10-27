@@ -114,3 +114,14 @@ def test_auto_is_constant_quality_capped_by_the_source():
     w = encoder_args(ExportSettings(container="webm", quality="auto"), "tiktok", 60, source_kbps=1800)
     assert "-crf" in w and "-b:v" in w and "libvpx-vp9" in w
     assert ExportSettings().quality == "auto"
+
+
+def test_smallest_uses_the_slower_encoder_and_one_more_step_of_compression_and_stays_capped():
+    from core.encode import capped_quality, encoder_args
+    from core.models import ExportSettings
+    auto = encoder_args(ExportSettings(quality="auto"), "tiktok", 60, 6000)
+    small = encoder_args(ExportSettings(quality="smallest"), "tiktok", 60, 6000)
+    assert auto[auto.index("-preset") + 1] == "veryfast" and small[small.index("-preset") + 1] == "slow"
+    assert auto[auto.index("-crf") + 1] == "22" and small[small.index("-crf") + 1] == "23"
+    assert small[small.index("-maxrate") + 1] == auto[auto.index("-maxrate") + 1]          # same cap on busy scenes
+    assert capped_quality("smallest") == "smallest" and capped_quality("high") == "auto" and capped_quality("custom") == "auto"

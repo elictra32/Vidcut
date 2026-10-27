@@ -13,7 +13,7 @@ import numpy as np
 
 from core.cover import CoverError, _ass_color, _escape, _run, _ts
 from core.fonts import FONT_FILES, FONTS_DIR, ass_size_factor, text_advance
-from core.media import find_ffmpeg, no_window
+from core.media import FFmpegError, find_ffmpeg, no_window, probe
 from core.names import safe_stem  # noqa: F401
 
 VW, VH = 1080, 1920
@@ -139,7 +139,8 @@ def _background(path: str, glow_y: float) -> None:
 
 def render_vertical_cover(kind: str, out_path: str, *, title: str = "", date_text: str = "", outro_text: str = DEFAULT_OUTRO_TEXT,
                           title_font: str = "Montserrat", date_font: str = "Prompt Light", outro_font: str = "Prompt Light", logo: str = "THUS_logo_white.png",
-                          cancel=None) -> str:
+                          cancel=None, still_at: float | None = None, sound: str | None = None) -> str:
+    """Make the cover clip at `out_path`; with `still_at` (seconds) only one PNG of that moment is made, as a quick preview."""
     if kind not in DURATION:
         raise CoverError("cover_kind", "Unknown cover kind")
     if kind == "intro" and not title.strip():
@@ -151,6 +152,12 @@ def render_vertical_cover(kind: str, out_path: str, *, title: str = "", date_tex
     if not logo_path.is_file():
         raise CoverError("logo_missing", "The logo file is missing", str(logo_path))
     end = DURATION[kind]
+    if sound:
+        try:
+            if not probe(sound)["has_audio"]:
+                raise CoverError("sound_no_audio", "That clip has no sound to use", sound)
+        except FFmpegError as e:
+            raise CoverError("unreadable_media", "The sound file is damaged or unreadable", e.details) from e
     wd = tempfile.mkdtemp(prefix="vidcut_vcover_")
     try:
         shutil.copytree(FONTS_DIR, Path(wd, "fonts"))
@@ -164,12 +171,22 @@ def render_vertical_cover(kind: str, out_path: str, *, title: str = "", date_tex
             f"[0:v]format=rgba,scale=w='560*{s}':h=-1:eval=frame,fade=t=in:st=0.15:d=0.6:alpha=1,fade=t=out:st={end - 0.3}:d=0.3:alpha=1[lg]",
             f"[bg][lg]overlay=x='(W-w)/2':y='{logo_y}-h/2':format=auto[v1]",
             "[v1]ass=cover.ass:fontsdir=fonts:shaping=complex,format=yuv420p[v]"])
-        tmp = os.path.join(wd, "out.mp4")
-        _run(["-loop", "1", "-framerate", str(FPS), "-t", f"{end}", "-i", os.path.join(wd, "logo.png"),
-              "-f", "lavfi", "-t", f"{end}", "-i", "anullsrc=r=44100:cl=stereo",
-              "-loop", "1", "-framerate", str(FPS), "-t", f"{end}", "-i", os.path.join(wd, "bg.png"),
-              "-filter_complex", graph, "-map", "[v]", "-map", "1:a", "-c:v", "libx264", "-preset", "medium",
-              "-crf", "16", "-r", str(FPS), "-c:a", "aac", "-b:a", "128k", "-t", f"{end}", "-movflags", "+faststart", tmp], cancel, cwd=wd)
+        tmp = os.path.join(wd, "out.png" if still_at is not None else "out.mp4")
+        silent = ["-f", "lavfi", "-t", f"{end}", "-i", "anullsrc=r=44100:cl=stereo"]
+        if sound:  # the sound of another clip (e.g. the landscape cover): from its start, cut or padded to the cover, faded out
+            audio_in = ["-i", sound]
+            graph += (f";[1:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{end},asetpts=PTS-STARTPTS,"
+                      f"afade=t=out:st={end - 0.4}:d=0.4,apad=whole_dur={end}[ac]")
+            amap = "[ac]"
+        else:
+            audio_in, amap = silent, "1:a"
+        inputs = ["-loop", "1", "-framerate", str(FPS), "-t", f"{end}", "-i", os.path.join(wd, "logo.png")] + audio_in + [
+                  "-loop", "1", "-framerate", str(FPS), "-t", f"{end}", "-i", os.path.join(wd, "bg.png"), "-filter_complex", graph]
+        if still_at is not None:
+            _run(inputs + ["-map", "[v]", "-ss", f"{min(max(still_at, 0.0), end - 0.1)}", "-frames:v", "1", tmp], cancel, cwd=wd)
+        else:
+            _run(inputs + ["-map", "[v]", "-map", amap, "-c:v", "libx264", "-preset", "medium", "-crf", "16", "-r", str(FPS),
+                           "-c:a", "aac", "-b:a", "128k", "-t", f"{end}", "-movflags", "+faststart", tmp], cancel, cwd=wd)
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         shutil.move(tmp, out_path)
         return out_path

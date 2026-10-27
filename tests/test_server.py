@@ -1017,3 +1017,42 @@ def test_a_clip_added_through_the_server_remembers_its_colour_matrix(client, tmp
     add_clip(client, make_clip(str(tmp_path / "c.mp4"), [("tone", 2)], size="1280x720"))
     c = get_project(client)["clips"][0]
     assert c["color_matrix"] in ("bt709", "bt601") and c["full_range"] is False
+
+
+def test_cover_preview_returns_a_png_with_the_chosen_fonts_without_making_clips(client):
+    r = client.post("/api/covers/preview", json={"format": "vertical", "title": "ตื่นได้แล้ว", "title_font": "Kanit Medium", "date_font": "Pridi Medium"})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content[:4] == b"\x89PNG"
+    back = client.post("/api/covers/preview", json={"format": "vertical", "kind": "outro", "outro_font": "Mitr Medium"})
+    assert back.status_code == 200 and back.content != r.content
+    assert client.post("/api/covers/preview", json={"format": "vertical", "title_font": "Nope"}).json()["error"]["code"] == "font_unknown"
+    assert get_project(client)["clips"] == []
+
+
+def test_vertical_covers_can_carry_the_sound_of_another_clip(client, tmp_path):
+    import subprocess
+    tone = add_clip(client, make_clip(str(tmp_path / "jingle.mp4"), [("tone", 6)], size="320x180"))["clip"]["id"]
+    r = client.post("/api/covers", json={"format": "vertical", "items": [{"title": "Loud"}], "date_text": "x", "with_outro": True,
+                                         "intro_sound_clip_id": tone, "replace_intros": False}).json()
+    done = wait_job(client, r["job"], timeout=180)
+    assert done["state"] == "done"
+    clips = {c["role"]: c for c in get_project(client)["clips"] if c["role"] != "main"}
+
+    def volume(path):
+        err = subprocess.run(["ffmpeg", "-i", path, "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True).stderr
+        return float(next(l for l in err.splitlines() if "mean_volume" in l).split("mean_volume:")[1].split("dB")[0])
+    assert volume(clips["intro"]["path"]) > -40 and volume(clips["outro"]["path"]) < -80       # the intro has the tone, the outro stays silent
+    assert abs(clips["intro"]["duration"] - 3.1) < 0.15
+    nope = client.post("/api/covers", json={"format": "vertical", "items": [{"title": "x"}], "intro_sound_clip_id": "missing"})
+    assert nope.status_code == 404
+
+
+def test_the_real_size_of_a_constant_quality_export_can_be_measured_from_samples(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "ms.mp4"), [("tone", 30)], size="320x180"))
+    put_project(client, export={"container": "mp4", "quality": "smallest", "target_mb": None, "filename": "", "out_dir": ""})
+    est = client.post("/api/export/estimate").json()
+    assert est["upper_bound"] is True
+    job = client.post("/api/export/measure").json()["job"]
+    done = wait_job(client, job, timeout=180)
+    assert done["state"] == "done", done
+    r = done["result"]
+    assert len(r["samples"]) >= 2 and 0 < r["bytes"] < est["bytes"]      # the real size is below the worst-case cap

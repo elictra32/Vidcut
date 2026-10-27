@@ -2,6 +2,7 @@
 import { api } from "./api.js";
 import { flush, getProject } from "./state.js";
 import { showError, showToast } from "./toast.js";
+import { setQueueRow } from "./status.js";
 import { $, el } from "./util.js";
 
 const STATE_LABEL = { queued: "Waiting", running: "Running", done: "Done", error: "Failed", cancelled: "Cancelled" };
@@ -13,7 +14,7 @@ export async function addToQueue(kind, params = {}) {
   try {
     if (!(await flush())) return null; // the server must hold the latest edits: the queue freezes a copy of them
     const item = await api("POST", "/api/queue", { kind, params: { preset: getProject().preset, ...params } });
-    showToast("Added to the queue. It runs after the jobs above it.", "info", 4000);
+    showToast("Added to the queue. Its progress shows at the top of the page, and you can keep working.", "info", 5000);
     refresh();
     return item;
   } catch (e) {
@@ -49,7 +50,31 @@ export function initQueuePanel() {
     try { await api(method, path, body); refresh(); } catch (e) { showError(e); }
   };
 
+  const seen = new Map(); // item id -> last state, to announce when something finishes
+  const announce = (q) => {
+    for (const it of q.items) {
+      const before = seen.get(it.id);
+      seen.set(it.id, it.state);
+      if (before === undefined || before === it.state) continue;   // first look at the list, or nothing new
+      if (it.state === "done") showToast(`Finished: ${it.label} — ${resultText(it)}`, "info", 9000);
+      else if (it.state === "error") showToast(`Failed: ${it.label} — ${it.error?.message ?? ""}`, "error", 9000);
+    }
+  };
+  // the header shows what the queue is doing, so it never looks idle while it works
+  const headerRow = (q) => {
+    const running = q.items.find((i) => i.state === "running");
+    const waiting = q.items.filter((i) => i.state === "queued").length;
+    if (running) {
+      const label = running.label.length > 48 ? `${running.label.slice(0, 47)}…` : running.label;
+      setQueueRow({ text: `Queue: ${label} ${Math.round(running.percent * 100)}%${running.message ? ` · ${running.message}` : ""}${waiting ? ` · ${waiting} waiting` : ""}`, percent: running.percent });
+    } else if (waiting) {
+      setQueueRow({ text: q.paused ? `Queue paused · ${waiting} waiting` : q.blocked ? `Queue: ${waiting} waiting for the other job to finish` : `Queue: ${waiting} waiting` });
+    } else setQueueRow(null);
+  };
+
   const render = (q) => {
+    announce(q);
+    headerRow(q);
     pause.textContent = q.paused ? "Resume queue" : "Pause queue";
     pause.dataset.paused = q.paused ? "1" : "0";
     const waiting = q.items.filter((i) => i.state === "queued" || i.state === "running").length;
@@ -64,7 +89,7 @@ export function initQueuePanel() {
           it.state === "queued" || it.state === "running"
             ? el("button", { class: "ghost icon q-cancel", title: it.state === "running" ? "Stop this job" : "Cancel", onclick: act("POST", `/api/queue/${it.id}/cancel`) }, "✕")
             : el("button", { class: "ghost icon q-remove", title: "Remove from the list", onclick: act("DELETE", `/api/queue/${it.id}`) }, "✕")),
-        el("div", { class: "muted small" }, `${STATE_LABEL[it.state] ?? it.state}${it.state === "running" ? ` · ${Math.round(it.percent * 100)}%` : ""}${it.message ? ` · ${it.message}` : ""}`),
+        el("div", { class: "muted small" }, `${STATE_LABEL[it.state] ?? it.state}${it.state === "queued" && q.blocked ? " · waiting for the other job to finish" : ""}${it.state === "running" ? ` · ${Math.round(it.percent * 100)}%` : ""}${it.message ? ` · ${it.message}` : ""}`),
         it.state === "running" ? el("progress", { max: 1, value: it.percent }) : "",
         it.state === "done" ? el("div", { class: "muted small" }, resultText(it)) : "",
         it.state === "error" ? el("div", { class: "q-error small" }, it.error?.message ?? "Failed", it.error?.hint ? ` — ${it.error.hint}` : "") : "");

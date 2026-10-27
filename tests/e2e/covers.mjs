@@ -41,6 +41,13 @@ try {
   const opts = await page.$$eval("#cover-title-font option", (o) => o.map((x) => x.value));
   must(opts.includes("Kanit Medium") && opts.includes("Montserrat") && (await page.$eval("#cover-outro-font", (s) => s.value)) === "Prompt Light", `the font lists are filled (${opts.length} fonts) with the brand fonts selected`);
   must(!(await page.isVisible("#cover-template")) && await page.isVisible("#cover-outro-text"), "the vertical style hides the template picker and offers the back cover");
+  await page.waitForSelector("#cover-preview-back:not([hidden])", { timeout: 30000 });
+  const src1 = await page.$eval("#cover-preview-front", (i) => i.src);
+  must(await page.isVisible("#cover-preview-back"), "the vertical style previews the front and the back cover without making any clip");
+  await page.click("#covers-panel summary:has-text(\"Fonts\")");
+  await page.selectOption("#cover-title-font", "Kanit Medium");
+  await page.waitForFunction((a) => document.querySelector("#cover-preview-front").src !== a, src1, { timeout: 20000 });
+  must(true, "choosing another font redraws the preview");
   await page.fill("#cover-titles", "Vertical One");
   await page.click("#btn-make-covers");
   await page.waitForSelector(".toast:has-text('Made 1 cover')", { timeout: 120000 });

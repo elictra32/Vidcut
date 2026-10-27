@@ -23,7 +23,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import media
 from core.autosub import generate_subtitles
-from core.encode import AUDIO_KBPS, _normalized, estimate_bytes, source_video_kbps, video_kbps
+from core.encode import AUDIO_KBPS, CONSTANT_QUALITY, CONTAINER_OVERHEAD, _normalized, capped_quality, estimate_bytes, source_video_kbps, video_kbps
 from core.align import align as align_audio
 from core.cover import CoverError, render_cover, safe_stem, thai_date
 from core.vcover import DEFAULT_OUTRO_TEXT, render_vertical_cover
@@ -38,7 +38,7 @@ from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
 from core.timeline import cut_points, edited_duration, enabled_keeps
 from core.rewrap import rewrap_subtitles
-from core.sizing import measure
+from core.sizing import SAFETY, measure
 from core.srt import parse_srt
 from core.srt_import import cues_to_subtitles
 from core.highlights import LEXICON, find_highlights, find_shots, lines_from_project, transcript_for_ai
@@ -68,7 +68,7 @@ class State:
         self.manifests = os.path.join(home, "manifests")
         self.lock = threading.RLock()
         self.project = load_project(home)
-        self.jobs = JobRunner()
+        self.jobs = JobRunner(workers=4)
         self.waveforms: dict = {}
         self.loudness: dict = {}
         # desktop mode (server/desktop.py): when the window is closed and nothing is running, the server exits
@@ -588,6 +588,16 @@ def create_app(home: str | None = None) -> FastAPI:
             default_date = thai_date(d.year, d.month, d.day)
         title_font, date_font = str(body.get("title_font") or "Montserrat"), str(body.get("date_font") or "Sarabun")
         outro_font = str(body.get("outro_font") or "Prompt Light")
+
+        def sound_of(key):   # the sound for a vertical cover comes from a clip already in the project (the file stays on disk)
+            cid = body.get(key)
+            if not cid:
+                return None
+            clip = st.clip(str(cid))
+            if not clip.has_audio:
+                raise AppError("sound_no_audio", "That clip has no sound to use", "Pick a clip that has sound, or silence")
+            return clip.path
+        intro_sound, outro_sound = sound_of("intro_sound_clip_id"), sound_of("outro_sound_clip_id")
         replace = bool(body.get("replace_intros", True))
 
         def work(progress, cancel):
@@ -602,7 +612,7 @@ def create_app(home: str | None = None) -> FastAPI:
                 try:
                     if vertical:
                         render_vertical_cover("intro", out, title=title, date_text=date_text or default_date, title_font=title_font,
-                                              date_font=date_font, cancel=cancel)
+                                              date_font=date_font, cancel=cancel, sound=intro_sound)
                     else:
                         render_cover(template, title, date_text or default_date, out, title_font=title_font, date_font=date_font, cancel=cancel)
                 except CoverError as e:
@@ -613,7 +623,7 @@ def create_app(home: str | None = None) -> FastAPI:
                 outro_file = os.path.join(st.covers, "THUS_outro_vertical.mp4")
                 try:
                     render_vertical_cover("outro", outro_file, outro_text=str(body.get("outro_text") or DEFAULT_OUTRO_TEXT)[:300],
-                                          outro_font=outro_font, cancel=cancel)
+                                          outro_font=outro_font, cancel=cancel, sound=outro_sound)
                 except CoverError as e:
                     raise AppError(e.code, e.message, "", e.details) from e
             clips = []
@@ -633,6 +643,36 @@ def create_app(home: str | None = None) -> FastAPI:
             progress(1.0, "Done")
             return {"count": len(made), "dir": st.covers, "names": [os.path.basename(p) for p in made], "outro": bool(outro_file)}
         return {"job": st.jobs.submit(work, "covers")}
+
+    @app.post("/api/covers/preview")
+    def post_covers_preview(body: dict):
+        """One quick PNG of a cover with the chosen text and fonts, so they can be judged before making the clips."""
+        title = " ".join(str(body.get("title") or "").split())[:120] or "Episode title"
+        date_text = str(body.get("date_text") or "").strip() or "วันที่ 1 มกราคม  2570"
+        kind = "outro" if body.get("kind") == "outro" else "intro"
+        title_font, date_font = str(body.get("title_font") or "Montserrat"), str(body.get("date_font") or "Prompt Light")
+        work_dir = tempfile.mkdtemp(prefix="vidcut_cp_")
+        out = os.path.join(work_dir, "cover.png")
+        try:
+            if body.get("format") == "vertical":
+                render_vertical_cover(kind, out, title=title, date_text=date_text, title_font=title_font, date_font=date_font,
+                                      outro_font=str(body.get("outro_font") or "Prompt Light"),
+                                      outro_text=str(body.get("outro_text") or DEFAULT_OUTRO_TEXT)[:300], still_at=2.4)
+            else:
+                if body.get("template_clip_id"):
+                    template = st.clip(str(body["template_clip_id"])).path
+                else:
+                    template = os.path.abspath(str(body.get("template_path", "")))
+                if not os.path.isfile(template):
+                    raise AppError("file_missing", "Template file not found", "Choose the cover clip to copy the look from", template, status=404)
+                render_cover(template, title, date_text, out, title_font=title_font, date_font=date_font, still_at=2.4)
+        except CoverError as e:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            raise AppError(e.code, e.message, "", e.details) from e
+        except Exception:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            raise
+        return FileResponse(out, media_type="image/png", background=BackgroundTask(shutil.rmtree, work_dir, True))
 
     # ---- split into episodes (each under a size limit, own intro, shared outro) ---------------------
     def episode_plan(snap: Project, max_mb: float, measured_kbps: float | None = None):
@@ -669,7 +709,7 @@ def create_app(home: str | None = None) -> FastAPI:
                 raise AppError("intro_choice_invalid", "The intro choice doesn't match the episodes", "Plan the episodes again")
             for e, i in zip(eps, chosen):
                 e.intro_clip_id = i or None
-        snap.export.quality = "auto"  # constant quality, capped per episode so each stays under the limit
+        snap.export.quality = capped_quality(snap.export.quality)  # constant quality, capped per episode so each stays under the limit
         return eps
 
     def run_single_export(snap: Project, progress, cancel) -> dict:
@@ -724,7 +764,7 @@ def create_app(home: str | None = None) -> FastAPI:
         out_dir = snap.export.out_dir or st.exports
         caps = highlight_caps(snap, ranges, with_extras, max_mb)
         if max_mb:
-            snap.export.quality = "auto"   # constant quality, capped per clip so each stays under the limit
+            snap.export.quality = capped_quality(snap.export.quality)   # constant quality, capped per clip so each stays under the limit
         total = sum(r["end"] - r["start"] for r in ranges)
         given = (snap.export.filename or "").strip()
         files, done = [], 0.0
@@ -859,7 +899,7 @@ def create_app(home: str | None = None) -> FastAPI:
         if measured is None and (body or {}).get("measure", True):
             # encode a few short samples of this footage: the real size is far below the worst-case cap for easy footage
             q = copy.deepcopy(snap)
-            q.export.quality = "auto"
+            q.export.quality = capped_quality(q.export.quality)
             sel = q.selection or Selection(0.0, edited_duration(q.clips))
             m = measure(q, sel.start, sel.end)
             measured, samples, measure_error = m.kbps, m.samples, m.error
@@ -915,7 +955,31 @@ def create_app(home: str | None = None) -> FastAPI:
         return {"seconds": seconds, "bytes": estimate_bytes(s, snap.preset, seconds, src),
                 "video_kbps": video_kbps(s, snap.preset, seconds, src), "audio_kbps": AUDIO_KBPS[s.container],
                 "source_kbps": round(src) if src else None,
-                "upper_bound": s.quality == "auto"}
+                "upper_bound": s.quality in CONSTANT_QUALITY}
+
+    @app.post("/api/export/measure")
+    def post_export_measure(body: dict | None = None):
+        """Encode a few short samples of the real footage at the chosen settings and say how big the whole file will be:
+        the estimate for constant-quality modes is only an upper bound (the cap), the footage usually lands far below it."""
+        with st.lock:
+            snap = copy.deepcopy(st.project)
+        if not snap.clips:
+            raise AppError("no_clips", "No clips in the project", "Add a clip first")
+        try:
+            seconds = export_duration(snap)
+        except ValueError as e:
+            raise from_exception(e) from e
+        sel = snap.selection or Selection(0.0, edited_duration(snap.clips))
+        audio = AUDIO_KBPS[_normalized(snap.export).container]
+
+        def work(progress, cancel):
+            m = measure(snap, sel.start, sel.end, cancel, progress)
+            if m.kbps is None:
+                raise AppError("measure_failed", "Couldn't measure the real size", m.error or "")
+            mean = m.kbps / SAFETY
+            return {"bytes": round((mean + audio) * 1000 / 8 * seconds * CONTAINER_OVERHEAD), "kbps": round(mean),
+                    "samples": m.samples, "seconds": seconds}
+        return {"job": st.jobs.submit(work, "measure")}
 
     @app.post("/api/preview-frame")
     def post_preview_frame(body: dict):

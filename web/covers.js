@@ -50,13 +50,29 @@ export function initCovers() {
   format.value = recall("vidcut.coverFormat", "landscape");
   const withOutro = el("input", { type: "checkbox", id: "cover-outro", checked: true });
   const outroText = el("textarea", { id: "cover-outro-text", rows: 3 });
+  const introSound = el("select", { id: "cover-intro-sound" }), outroSound = el("select", { id: "cover-outro-sound" });
   outroText.value = recall("vidcut.coverOutroText2", "ขอบคุณที่รับชม\nติดตาม THUS ไว้\nไม่พลาดตอนต่อไป");
   outroText.addEventListener("change", () => remember("vidcut.coverOutroText2", outroText.value));
   const templateField = el("label", { class: "field" }, el("span", {}, "Copy the look of"), template);
   const verticalBox = el("div", { class: "vertical-only" },
     el("p", { class: "muted small" }, "Draws the front cover in the THUS colours (logo, title in orange on a black box, date), kept clear of TikTok's buttons and captions. Set the preset to TikTok before exporting."),
     el("label", { class: "field inline" }, el("span", {}, "Also make a matching back cover (outro)"), withOutro),
-    el("label", { class: "field" }, el("span", {}, "Back cover text (one line each)"), outroText));
+    el("label", { class: "field" }, el("span", {}, "Back cover text (one line each)"), outroText),
+    el("label", { class: "field" }, el("span", {}, "Sound of the front cover"), introSound),
+    el("label", { class: "field" }, el("span", {}, "Sound of the back cover"), outroSound),
+    el("p", { class: "muted small" }, "The sound is taken from a clip in this project (for example your landscape intro or outro), from its start, faded out at the end. (silence) = no sound."));
+  const fillSounds = () => {
+    const clips = (getProject()?.clips ?? []).filter((c) => c.has_audio);
+    const label = (c) => `${basename(c.path)}${(c.role ?? "main") === "main" ? "" : ` (${c.role})`}`;
+    for (const [sel, role] of [[introSound, "intro"], [outroSound, "outro"]]) {
+      const keep = sel.value;
+      sel.replaceChildren(el("option", { value: "" }, "(silence)"), ...clips.map((c) => el("option", { value: c.id }, label(c))));
+      // by default take the sound of the cover you already have (your landscape intro / outro), if there is one
+      const first = clips.find((c) => c.role === role) ?? (role === "outro" ? null : clips.find((c) => c.role === "intro"));
+      sel.value = clips.some((c) => c.id === keep) || keep === "" && sel.dataset.touched ? keep : first?.id ?? "";
+    }
+  };
+  for (const sel of [introSound, outroSound]) sel.addEventListener("change", () => (sel.dataset.touched = "1"));
   const syncFormat = () => {
     const v = format.value === "vertical";
     templateField.hidden = v;
@@ -75,6 +91,53 @@ export function initCovers() {
     if (cands.some((c) => c.id === keep)) template.value = keep;
   };
 
+  // ---- live preview: one quick picture of the cover with the current title, date and fonts ----
+  const imgFront = el("img", { id: "cover-preview-front", class: "cover-preview-img", alt: "Front cover preview", hidden: true });
+  const imgBack = el("img", { id: "cover-preview-back", class: "cover-preview-img", alt: "Back cover preview", hidden: true });
+  const previewNote = el("p", { class: "muted small", id: "cover-preview-note" });
+  const previewBox = el("div", { class: "cover-preview" }, el("div", { class: "row" }, imgFront, imgBack), previewNote);
+  let previewTimer = null, previewSeq = 0;
+  const fetchPng = async (body) => {
+    const res = await fetch("/api/covers/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.error?.message ?? `HTTP ${res.status}`);
+    return URL.createObjectURL(await res.blob());
+  };
+  const refreshPreview = () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      const seq = ++previewSeq;
+      const vertical = format.value === "vertical";
+      const tplClip = getProject()?.clips.find((c) => c.id === template.value);
+      if (!vertical && !tplClip) { imgFront.hidden = imgBack.hidden = true; previewNote.textContent = "Add a cover clip to preview the look."; return; }
+      // only the THUS template shape can be drawn on (see core/cover.py check_template): don't ask the server for anything else
+      if (!vertical && !(tplClip.width === 1920 && tplClip.height === 1080 && tplClip.duration >= 2.5 && tplClip.duration <= 4)) {
+        imgFront.hidden = imgBack.hidden = true;
+        previewNote.textContent = "No preview: this clip is not a THUS cover template (1920×1080, about 3 seconds).";
+        return;
+      }
+      previewNote.textContent = "Drawing the preview…";
+      const base = { format: vertical ? "vertical" : "landscape", template_clip_id: template.value, title: parseTitles(titles.value)[0]?.title || "Episode title",
+        date_text: dateText.value.trim(), title_font: titleFont.value, date_font: dateFont.value, outro_font: outroFont.value, outro_text: outroText.value };
+      try {
+        const front = await fetchPng({ ...base, kind: "intro" });
+        const back = vertical && withOutro.checked ? await fetchPng({ ...base, kind: "outro" }) : null;
+        if (seq !== previewSeq) return (URL.revokeObjectURL(front), back && URL.revokeObjectURL(back));
+        for (const [img, url] of [[imgFront, front], [imgBack, back]]) {
+          if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+          if (url) img.src = url; else img.removeAttribute("src");
+          img.hidden = !url;
+        }
+        previewNote.textContent = "Preview of the cover at its end (the real clip fades its texts in).";
+      } catch (e) {
+        if (seq === previewSeq) previewNote.textContent = `Couldn't draw the preview: ${e.message}`;
+      }
+    }, 600);
+  };
+  for (const c of [titles, dateText, date, template, format, titleFont, dateFont, outroFont, outroText, withOutro]) {
+    c.addEventListener("input", refreshPreview);
+    c.addEventListener("change", refreshPreview);
+  }
+
   make.addEventListener("click", async () => {
     const items = parseTitles(titles.value);
     const vertical = format.value === "vertical";
@@ -86,6 +149,7 @@ export function initCovers() {
     try {
       const { job } = await withSavedProject(() => api("POST", "/api/covers", {
         format: vertical ? "vertical" : "landscape", with_outro: withOutro.checked, outro_text: outroText.value,
+        intro_sound_clip_id: introSound.value || null, outro_sound_clip_id: outroSound.value || null,
         template_clip_id: template.value, items, date_text: dateText.value.trim(), replace_intros: replace.checked,
         title_font: titleFont.value, date_font: dateFont.value, outro_font: outroFont.value }));
       const done = await trackJob("Making covers", job);
@@ -112,9 +176,12 @@ export function initCovers() {
       el("label", { class: "field" }, el("span", {}, "Title (front cover)"), titleFont), el("label", { class: "field" }, el("span", {}, "Date (front cover)"), dateFont),
       el("label", { class: "field" }, el("span", {}, "Text of the back cover"), outroFont),
       el("p", { class: "muted small" }, "Each font name is shown in its own style. All of them draw Thai and English.")),
+    previewBox,
     make);
-  subscribe((why) => { if (why === "load") fillFonts(); if (why === "load" || why === "keeps" || why === "edit") fillTemplates(); });
+  subscribe((why) => { if (why === "load") { fillFonts(); refreshPreview(); } if (why === "load" || why === "keeps" || why === "edit") { fillTemplates(); fillSounds(); } });
   fillTemplates();
   fillFonts();
+  fillSounds();
   syncFormat();
+  refreshPreview();
 }

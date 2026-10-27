@@ -57,11 +57,28 @@ export function initExportPanel() {
   const container = el("select", { id: "opt-container" },
     option("mp4", "MP4 (plays everywhere, recommended)"), option("mov", "MOV"), option("mkv", "MKV"), option("webm", "WebM (slower to encode)"));
   const quality = el("select", { id: "opt-quality" },
-    option("auto", "Best value (keeps the look, smallest file)"), option("high", "High quality (large file)"), option("medium", "Medium quality"), option("small", "Small file"), option("custom", "Custom size"));
+    option("auto", "Best value (keeps the look, small file)"), option("smallest", "Smallest file, same look (slower to export)"), option("high", "High quality (large file)"), option("medium", "Medium quality"), option("small", "Small file"), option("custom", "Custom size"));
   const target = el("input", { type: "number", id: "opt-target", min: 1, step: 1 });
   const targetRow = el("label", { class: "field" }, el("span", {}, "Target file size (MB)"), target);
   const folderText = el("span", { class: "folder-text small" });
   const estimate = el("p", { id: "estimate", class: "estimate small" });
+  // "Best value" / "Smallest" only know an upper bound (the cap); encoding a few short samples tells the real size
+  const measureBtn = el("button", { id: "btn-measure", class: "small", title: "Encodes a few short samples of your video with these settings and works out the real file size" }, "Measure the real size");
+  const measureRow = el("div", { class: "row", hidden: true }, measureBtn, el("span", { class: "muted small" }, "about 30 seconds"));
+  measureBtn.addEventListener("click", async () => {
+    measureBtn.disabled = true;
+    try {
+      const { job } = await withSavedProject(() => api("POST", "/api/export/measure"));
+      const done = await trackJob("Measuring the real size", job);
+      if (!done) return;
+      const r = done.result, mb = r.bytes / 1048576;
+      estimate.textContent = `Measured on ${r.samples.length} short samples of your video: about ${mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)} MB for the whole file (video about ${(r.kbps / 1000).toFixed(1)} Mbps, ±15%)`;
+    } catch (e) {
+      showError(e);
+    } finally {
+      measureBtn.disabled = false;
+    }
+  });
   container.addEventListener("change", () => setExport({ container: container.value }));
   quality.addEventListener("change", () => setExport({ quality: quality.value, ...(quality.value === "custom" && !getProject().export.target_mb ? { target_mb: 20 } : {}) }));
   target.addEventListener("input", () => setExport({ target_mb: parseFloat(target.value) || null }));
@@ -134,7 +151,7 @@ export function initExportPanel() {
 
   root.replaceChildren(el("h2", {}, "Export"), seg, framing,
     el("label", { class: "field" }, el("span", {}, "File type"), container),
-    el("label", { class: "field" }, el("span", {}, "Quality / size"), quality), targetRow, fileNameRow, folderRow, estimate,
+    el("label", { class: "field" }, el("span", {}, "Quality / size"), quality), targetRow, fileNameRow, folderRow, estimate, measureRow,
     el("label", { class: "field inline" }, el("span", {}, "Show app UI safe zone"), safe),
     el("div", { class: "row" }, el("button", { onclick: checkFrame }, "Check real frame"), exportBtn,
       el("button", { id: "btn-queue-export", title: "Add this export to the queue instead of running it now", onclick: () => addToQueue("export") }, "Add to queue")), result);
@@ -146,6 +163,7 @@ export function initExportPanel() {
     container.value = p.export.container;
     quality.value = p.export.quality;
     targetRow.hidden = p.export.quality !== "custom";
+    measureRow.hidden = !["auto", "smallest"].includes(p.export.quality);
     if (document.activeElement !== target) target.value = p.export.target_mb ?? "";
     if (document.activeElement !== fileName) fileName.value = p.export.filename ?? "";
     const mainClip = p.clips.find((c) => (c.role ?? "main") === "main");

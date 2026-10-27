@@ -55,7 +55,11 @@ class JobQueue:
     def snapshot(self) -> dict:
         with self._cond:
             items = [{k: v for k, v in it.items() if k not in PUBLIC_HIDDEN} for it in self.items]
-            return {"items": items, "paused": self.paused, "running": any(i["state"] == "running" for i in items)}
+            running = any(i["state"] == "running" for i in items)
+            waiting = any(i["state"] == "queued" for i in items)
+            # items are waiting only because another job (an export started by hand, covers...) is still using the machine
+            blocked = waiting and not running and not self.paused and bool(self.busy())
+            return {"items": items, "paused": self.paused, "running": running, "blocked": blocked}
 
     def _find(self, item_id: str) -> dict | None:
         return next((i for i in self.items if i["id"] == item_id), None)
