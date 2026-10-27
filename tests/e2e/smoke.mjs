@@ -102,6 +102,10 @@ try {
   // export options: another format and size, a size estimate, and a chosen folder
   await page.selectOption("#opt-container", "mkv");
   await page.selectOption("#opt-quality", "small");
+  must(!(await page.isVisible("#opt-target")), "the target-size box is hidden unless quality is Custom size");
+  await page.selectOption("#opt-quality", "custom");
+  must(await page.isVisible("#opt-target"), "the target-size box shows for Custom size");
+  await page.selectOption("#opt-quality", "small");
   await page.waitForFunction(() => /MB/.test(document.querySelector("#estimate")?.textContent ?? ""), null, { timeout: 10000 });
   must(/approx\. size/.test(await page.$eval("#estimate", (e) => e.textContent)), "the export panel shows a size estimate");
   await page.click("#opt-folder-pick");
