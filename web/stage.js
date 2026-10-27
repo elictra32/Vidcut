@@ -92,11 +92,7 @@ function render() {
       node = document.createElement("div");
       node.className = "sub";
       node.addEventListener("pointerdown", (e) => startDrag(e, sub.id));
-      node.addEventListener("dblclick", () => update((q) => {
-        const s = q.subtitles.find((x) => x.id === sub.id);
-        s.x = s.y = null;
-        s.scale = null;
-      }, "subs-pos"));
+      node.addEventListener("dblclick", () => startEdit(node, sub.id));
       node.addEventListener("wheel", (e) => {
         e.preventDefault(); // wheel over a subtitle resizes just that line
         const f = Math.exp(-e.deltaY * 0.001);
@@ -108,11 +104,42 @@ function render() {
       overlay.append(node);
       nodes.set(sub.id, node);
     }
+    if (node.dataset.editing) continue; // being typed in: leave its text alone
     style(node, sub, p.style, scale, spans.get(sub.id), t);
   }
 }
 
+/** Edit a subtitle's text right on the preview: Esc, Ctrl+Enter or clicking elsewhere saves; Enter adds a line break. */
+function startEdit(node, id) {
+  const sub = getProject().subtitles.find((s) => s.id === id);
+  if (!sub || node.dataset.editing) return;
+  player.pause();
+  setSelectedSub(id);
+  node.dataset.editing = "1";
+  node.textContent = sub.text;
+  node.contentEditable = "plaintext-only";
+  if (node.contentEditable !== "plaintext-only") node.contentEditable = "true";
+  node.focus();
+  getSelection().selectAllChildren(node);
+  const done = () => {
+    node.removeEventListener("blur", done);
+    node.removeEventListener("keydown", keys);
+    const text = node.innerText.replace(/\u00a0/g, " ").replace(/\n+$/, "");
+    node.contentEditable = "false";
+    delete node.dataset.editing;
+    if (text.trim() && text !== sub.text) update((q) => (q.subtitles.find((s) => s.id === id).text = text), "subs");
+    else render();
+  };
+  const keys = (e) => {
+    if (e.key === "Escape" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) { e.preventDefault(); node.blur(); }
+    e.stopPropagation(); // typing must not trigger the app's shortcuts (space = play, I/O = In/Out ...)
+  };
+  node.addEventListener("blur", done);
+  node.addEventListener("keydown", keys);
+}
+
 function startDrag(e, id) {
+  if (e.currentTarget.dataset.editing) return; // text editing: let the click place the cursor
   const p = getProject();
   const sub = p.subtitles.find((s) => s.id === id);
   const r = frame.getBoundingClientRect();

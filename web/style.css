@@ -154,3 +154,8 @@ button.danger { color: #ff8a8a; }
 #hl-answer { width: 100%; }
 .role-tag { display: block; font-size: 11px; color: var(--accent, #2dd4a7); }
 .role-tag[data-role="outro"] { color: #f0a050; }
+.numslider { display: inline-flex; align-items: center; gap: 6px; }
+.numslider input[type=range] { flex: 1; min-width: 60px; }
+.numslider .num { width: 64px; }
+.field > .numslider { width: 100%; }
+.sub-tools .num { width: 56px; }

@@ -32,6 +32,7 @@ from core.models import ROLES, Clip, Keep, Overlay, Project, Selection, project_
 from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
 from core.timeline import cut_points, edited_duration, enabled_keeps
+from core.rewrap import rewrap_subtitles
 from core.srt import parse_srt
 from core.srt_import import cues_to_subtitles
 from core.highlights import LEXICON, find_highlights, lines_from_project, transcript_for_ai
@@ -423,6 +424,22 @@ def create_app(home: str | None = None) -> FastAPI:
             st.project.rev += 1
             st.save()
         return {"count": len(subs)}
+
+    @app.post("/api/subtitles/rewrap")
+    def post_rewrap(body: dict):
+        """Re-flow every subtitle to N characters per line (and at most M lines)."""
+        try:
+            width, lines = int(body.get("max_chars")), int(body.get("max_lines", 2))
+        except (TypeError, ValueError) as e:
+            raise AppError("rewrap_invalid", "Enter the characters per line as a number") from e
+        if not (4 <= width <= 80 and 1 <= lines <= 4):
+            raise AppError("rewrap_invalid", "Characters per line must be 4–80 and lines 1–4")
+        with st.lock:
+            before = len(st.project.subtitles)
+            st.project.subtitles = rewrap_subtitles(st.project.subtitles, width, lines)
+            st.project.rev += 1
+            st.save()
+            return {"before": before, "after": len(st.project.subtitles)}
 
     # ---- transcribe / export -------------------------------------------------------------
     @app.post("/api/transcribe")

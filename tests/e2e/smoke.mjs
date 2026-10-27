@@ -67,8 +67,13 @@ try {
   await page.locator(".sub-row >> text=Merge").first().click();
   await page.waitForFunction((n) => document.querySelectorAll(".sub-row").length === n, before, { timeout: 5000 });
   must(true, "Merge joins a line with the next one");
-  const sizeInput = page.locator(".sub-row .sub-size").first();
-  await sizeInput.evaluate((i) => { i.value = 200; i.dispatchEvent(new Event("input")); });
+  const sizeInput = page.locator(".sub-row .numslider input[type=range]").first();
+  await page.locator(".sub-row .numslider .num").first().fill("150");
+  await page.locator(".sub-row .numslider .num").first().press("Tab"); // typing an exact number also works
+  await page.waitForTimeout(700);
+  must(await page.evaluate(async () => (await (await fetch("/api/project")).json()).project.subtitles.some((x) => x.scale === 1.5)), "typing 150 in the size box sets the line size to 150%");
+  await sizeInput.evaluate((i) => { i.value = 2; i.dispatchEvent(new Event("input")); });
+  must(await page.locator(".sub-row .numslider .num").first().inputValue() === "200", "the number box follows the slider");
   await page.waitForTimeout(700);
   must(await page.evaluate(async () => (await (await fetch("/api/project")).json()).project.subtitles.some((x) => x.scale === 2)), "per-line size is saved");
   await page.locator(".sub-row textarea").first().fill(EDITED);

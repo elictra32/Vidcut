@@ -3,7 +3,7 @@
 import { api } from "./api.js";
 import { flush, getProject, loadProject, subscribe, update } from "./state.js";
 import { showError } from "./toast.js";
-import { $, basename, el } from "./util.js";
+import { $, basename, el, numberSlider } from "./util.js";
 
 const layer = $("#ov-layer");
 const frame = $("#frame");
@@ -73,11 +73,18 @@ async function removeImage(id) {
   }
 }
 
-function slider(label, value, min, max, step, fmt, onInput) {
-  const out = el("span", { class: "muted small" }, fmt(value));
-  const input = el("input", { type: "range", min, max, step, value });
-  input.addEventListener("input", () => { out.textContent = fmt(+input.value); onInput(+input.value); });
-  return el("label", { class: "field" }, el("span", {}, label), input, out);
+function slider(label, value, min, max, step, onInput) {
+  const ns = numberSlider({ min, max, step, value, unit: "%", label: `${label} (percent)`, toDisplay: (v) => v * 100, fromDisplay: (d) => d / 100, onInput });
+  return el("div", { class: "field" }, el("span", {}, label), ns.root);
+}
+
+function posBox(o, axis) {
+  const input = el("input", { type: "number", class: "num", "data-axis": axis, min: 0, max: 100, step: 1, value: Math.round(o[axis] * 100), "aria-label": `${axis === "x" ? "Horizontal" : "Vertical"} position (percent)` });
+  input.addEventListener("change", () => {
+    const d = parseFloat(input.value);
+    if (Number.isFinite(d)) update((q) => (find(q, o.id)[axis] = clamp(d / 100, 0, 1)), "ov-pos");
+  });
+  return input;
 }
 
 function seconds(value, onChange, aria) {
@@ -102,10 +109,10 @@ export function initOverlays() {
       el("div", { class: "row" }, el("img", { class: "ov-thumb", src: `/overlay-media/${o.id}`, alt: "" }),
         el("span", { class: "muted small ov-name" }, basename(o.path)), el("span", { class: "spacer" }),
         el("button", { class: "ghost icon", title: "Remove this image from the project", onclick: () => removeImage(o.id) }, "✕")),
-      slider("Size", o.width, 0.03, 1, 0.01, (v) => `${Math.round(v * 100)}%`,
-        (v) => update((q) => (find(q, o.id).width = v), "ov-pos")),
-      slider("Opacity", o.opacity, 0.1, 1, 0.05, (v) => `${Math.round(v * 100)}%`,
-        (v) => update((q) => (find(q, o.id).opacity = v), "ov-pos")),
+      slider("Size", o.width, 0.03, 1, 0.01, (v) => update((q) => (find(q, o.id).width = v), "ov-pos")),
+      slider("Opacity", o.opacity, 0.1, 1, 0.05, (v) => update((q) => (find(q, o.id).opacity = v), "ov-pos")),
+      el("div", { class: "field" }, el("span", {}, "Position (percent of the frame)"),
+        el("div", { class: "row" }, el("span", { class: "muted small" }, "X"), posBox(o, "x"), el("span", { class: "muted small" }, "Y"), posBox(o, "y"))),
       el("div", { class: "field" }, el("span", {}, "Show from / to (seconds in the exported video; empty = whole video)"),
         el("div", { class: "row" },
           seconds(o.start, (v) => update((q) => (find(q, o.id).start = v), "ov-time"), "Show from (seconds)"),
@@ -116,6 +123,13 @@ export function initOverlays() {
   subscribe((why) => {
     renderStage();
     if (why === "load") renderList();
+    else if (why === "ov-pos") {
+      // a drag on the preview moved an image: show the new position in the boxes
+      for (const row of list.querySelectorAll(".ov-row")) {
+        const o = find(getProject(), row.dataset.id);
+        for (const box of row.querySelectorAll("input[data-axis]")) if (o && document.activeElement !== box) box.value = String(Math.round(o[box.dataset.axis] * 100));
+      }
+    }
   });
   renderStage();
   renderList();

@@ -1,5 +1,5 @@
 import { getFonts, getProject, subscribe, update } from "./state.js";
-import { $, el } from "./util.js";
+import { $, el, numberSlider } from "./util.js";
 
 export function initStylePanel() {
   const root = $("#style-panel");
@@ -7,12 +7,13 @@ export function initStylePanel() {
   const refs = {};
 
   const set = (key, value) => update((p) => (p.style[key] = value), "style");
-  const slider = (key, label, min, max, step, fmt = (v) => v) => {
-    const out = el("output", {});
-    const input = el("input", { type: "range", min, max, step });
-    input.addEventListener("input", () => (set(key, parseFloat(input.value)), (out.textContent = fmt(parseFloat(input.value)))));
-    refs[key] = { input, out, fmt };
-    return el("label", { class: "field" }, el("span", {}, label, " ", out), input);
+  // percent=true: stored as 0..1, typed as 0..100
+  const slider = (key, label, min, max, step, percent = false) => {
+    const ns = numberSlider({ min, max, step, value: min, label, unit: percent ? "%" : "",
+      toDisplay: percent ? (v) => v * 100 : (v) => v, fromDisplay: percent ? (d) => d / 100 : (d) => d,
+      onInput: (v) => set(key, v) });
+    refs[key] = { ns };
+    return el("div", { class: "field" }, el("span", {}, label), ns.root);
   };
   const color = (key, label) => {
     const input = el("input", { type: "color" });
@@ -44,11 +45,11 @@ export function initStylePanel() {
       slider("outline_width", "Outline width", 0, 12, 1),
       slider("shadow", "Shadow", 0, 8, 1),
       el("label", { class: "field inline" }, el("span", {}, "Box background"), bgOn, bg),
-      slider("default_x", "Horizontal position", 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`),
-      slider("default_y", "Vertical position", 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`),
+      slider("default_x", "Horizontal position", 0, 1, 0.01, true),
+      slider("default_y", "Vertical position", 0, 1, 0.01, true),
       el("label", { class: "field inline", title: "Each line fills in piece by piece over the time it is on screen" },
         el("span", {}, "Reveal text as it's spoken"), revealOn),
-      el("p", { class: "muted small" }, "Drag a subtitle on the preview to move just that line (double-click to reset)"),
+      el("p", { class: "muted small" }, "On the preview: drag a subtitle to move it, mouse wheel to resize it, double-click to edit its text. Type exact numbers in the boxes."),
       reset);
     built = true;
   };
@@ -60,8 +61,8 @@ export function initStylePanel() {
     const st = p.style;
     for (const [k, r] of Object.entries(refs)) {
       if (k === "bgOn" || k === "bg_color" || k === "revealOn") continue;
+      if (r.ns) { if (!r.ns.focused()) r.ns.sync(st[k]); continue; }
       if (document.activeElement !== r.input) r.input.value = st[k];
-      if (r.out) r.out.textContent = r.fmt(st[k]);
     }
     refs.revealOn.input.checked = !!st.reveal;
     refs.bgOn.input.checked = st.bg_color != null;

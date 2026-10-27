@@ -780,3 +780,15 @@ def test_episode_export_uses_the_intro_chosen_for_each_episode(client, tmp_path)
     assert j["state"] == "done", j
     durs = [media.probe(os.path.join(out, f["video"]))["duration"] for f in j["result"]["files"]]
     assert durs[0] == pytest.approx(30 + 3 + 1, abs=0.6) and durs[1] == pytest.approx(30 + 2 + 1, abs=0.6)
+
+
+def test_rewrap_endpoint_reflows_all_subtitles_and_validates(client, tmp_path):
+    cid = add_clip(client, make_clip(str(tmp_path / "w.mp4"), [("tone", 20)], size="320x180"))["clip"]["id"]
+    text = "สวัสดีครับทุกคนวันนี้เรามาตัดต่อวิดีโอกันนะครับ"
+    put_project(client, subtitles=[{"id": "a", "clip_id": cid, "src_start": 0, "src_end": 6, "text": text, "x": None, "y": None, "scale": None}])
+    r = client.post("/api/subtitles/rewrap", json={"max_chars": 8, "max_lines": 1}).json()
+    assert r["before"] == 1 and r["after"] > 1
+    subs = get_project(client)["subtitles"]
+    assert "".join(s["text"] for s in subs) == text and subs[0]["src_start"] == 0 and subs[-1]["src_end"] == 6
+    assert client.post("/api/subtitles/rewrap", json={"max_chars": 2, "max_lines": 1}).json()["error"]["code"] == "rewrap_invalid"
+    assert client.post("/api/subtitles/rewrap", json={"max_chars": "x"}).json()["error"]["code"] == "rewrap_invalid"

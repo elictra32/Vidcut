@@ -55,3 +55,29 @@ export function recall(key, fallback) {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 }
 
+
+/**
+ * A slider with a number box beside it, kept in step: drag for speed, type for precision.
+ * `toDisplay`/`fromDisplay` convert between the stored value and what the box shows (e.g. 0.52 <-> 52 for percent).
+ * Returns { root, sync(value), focused() }; `onInput(value)` gets the stored value.
+ */
+export function numberSlider({ min, max, step, value, toDisplay = (v) => v, fromDisplay = (d) => d, unit = "", onInput, label = "" }) {
+  const range = el("input", { type: "range", min, max, step, value });
+  const dMin = toDisplay(min), dMax = toDisplay(max);
+  const num = el("input", { type: "number", class: "num", min: Math.min(dMin, dMax), max: Math.max(dMin, dMax),
+    step: Math.abs(toDisplay(min + step) - dMin) || 1, "aria-label": label });
+  const show = (v) => (num.value = String(Math.round(toDisplay(v) * 100) / 100));
+  const sync = (v) => { range.value = v; show(v); };
+  const clampStored = (v) => Math.min(max, Math.max(min, v));
+  range.addEventListener("input", () => { show(parseFloat(range.value)); onInput(parseFloat(range.value)); });
+  num.addEventListener("change", () => {
+    const d = parseFloat(num.value);
+    if (!Number.isFinite(d)) return show(parseFloat(range.value)); // not a number: put the old value back
+    const v = clampStored(fromDisplay(d));
+    sync(v);
+    onInput(v);
+  });
+  sync(value);
+  return { root: el("span", { class: "numslider" }, range, num, unit ? el("span", { class: "muted small" }, unit) : ""), sync,
+    focused: () => document.activeElement === num || document.activeElement === range };
+}

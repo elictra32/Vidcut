@@ -6,7 +6,7 @@ import { showError, showToast } from "./toast.js";
 import * as tm from "./timeline_math.js";
 import * as player from "./player.js";
 import { LANE_TOP, setSubtitleLane, timeAtX } from "./timeline_view.js";
-import { $, basename, cssVar, el, fmtTime, recall, remember } from "./util.js";
+import { $, basename, cssVar, el, fmtTime, numberSlider, recall, remember } from "./util.js";
 
 const MODELS = {
   "large-v3": "Most accurate · first use downloads about 3 GB · slowest on CPU",
@@ -161,6 +161,18 @@ export function initSubtitles() {
   const note = el("p", { class: "muted small" }, MODELS[model.value]);
   model.addEventListener("change", () => (remember("vidcut.model", model.value), (note.textContent = MODELS[model.value])));
   const list = el("div", { class: "sub-list" });
+  const rewrapChars = el("input", { type: "number", id: "rewrap-chars", class: "num", min: 4, max: 80, step: 1, value: recall("vidcut.rewrapChars", 14) });
+  const rewrapLines = el("input", { type: "number", id: "rewrap-lines", class: "num", min: 1, max: 4, step: 1, value: recall("vidcut.rewrapLines", 2) });
+  const rewrapAll = async () => {
+    const chars = +rewrapChars.value, lines = +rewrapLines.value;
+    remember("vidcut.rewrapChars", chars); remember("vidcut.rewrapLines", lines);
+    if (!getProject().subtitles.length) return showToast("There are no subtitles to re-wrap", "error");
+    try {
+      const r = await withSavedProject(() => api("POST", "/api/subtitles/rewrap", { max_chars: chars, max_lines: lines }));
+      await loadProject();
+      showToast(`Re-wrapped to ${chars} characters per line (${r.before} → ${r.after} subtitles). Ctrl+Z undoes it.`, "info", 6000);
+    } catch (e) { showError(e); }
+  };
   const srtInput = el("input", { type: "file", id: "srt-file", accept: ".srt,.vtt,.sbv,.txt,text/plain", hidden: true });
   srtInput.addEventListener("change", async () => {
     const file = srtInput.files[0];
@@ -173,15 +185,29 @@ export function initSubtitles() {
     el("div", { class: "row" },
       el("button", { class: "primary", onclick: () => generate(model.value) }, "Generate subtitles"),
       el("button", { onclick: addBlank }, "+ Add subtitle")),
+    el("div", { class: "field rewrap" }, el("span", {}, "Re-wrap every subtitle"),
+      el("div", { class: "row" },
+        el("label", { title: "TikTok 9:16 starts at 14, YouTube 16:9 at 36" }, "Characters per line ", rewrapChars), el("label", {}, "Lines ", rewrapLines),
+        el("button", { id: "btn-rewrap", title: "Re-flow all subtitles to this many characters per line (breaks only between words)", onclick: rewrapAll }, "Apply to all"))),
     el("div", { class: "row" },
       el("button", { title: "Import subtitles from an .srt, .vtt or .sbv file, e.g. downloaded from YouTube Studio", onclick: () => srtInput.click() }, "Import .srt / .vtt / .sbv file"),
       srtInput,
       el("button", { class: "danger", id: "btn-delete-all-subs", title: "Delete every subtitle in the project", onclick: deleteAll }, "Delete all subtitles")),
     list);
 
+  const toolRefs = new Map(); // "<id>:x" | "<id>:y" | "<id>:size" -> the row's inputs, to follow drags on the preview
+  const syncTools = () => {
+    const p = getProject();
+    for (const r of toolRefs.values()) {
+      const s = p.subtitles.find((x) => x.id === r.id);
+      if (!s) continue;
+      if (r.size) { if (!r.size.focused()) r.size.sync(s.scale ?? 1); } else if (document.activeElement !== r.input) r.input.value = s[r.axis] != null ? String(Math.round(s[r.axis] * 100)) : "";
+    }
+  };
   const render = () => {
     const p = getProject();
     if (!p) return; // not loaded yet
+    toolRefs.clear();
     const rows = p.subtitles.map((s) => ({ s, span: spanOf(s) }))
       .sort((a, b) => (a.span ? a.span[0] : 1e9 + a.s.src_start) - (b.span ? b.span[0] : 1e9 + b.s.src_start));
     list.replaceChildren(...(rows.length ? rows.map(({ s, span }, i) => {
@@ -189,14 +215,23 @@ export function initSubtitles() {
       ta.value = s.text;
       const count = el("span", { class: "muted small chars" }, `${charCount(s.text)} chars`);
       const next = rows[i + 1]?.s.clip_id === s.clip_id ? rows[i + 1].s : null;
-      const size = el("input", { type: "range", min: 40, max: 300, step: 5, value: Math.round((s.scale ?? 1) * 100), class: "sub-size",
-        "aria-label": "Size of this line", title: "Size of this line only (double-click to reset)" });
-      const sizeLabel = el("span", { class: "muted small" }, `${size.value}%`);
-      size.addEventListener("input", () => {
-        sizeLabel.textContent = `${size.value}%`;
-        update((q) => (q.subtitles.find((x) => x.id === s.id).scale = +size.value === 100 ? null : +size.value / 100), "subs-pos");
-      });
-      size.addEventListener("dblclick", () => { size.value = 100; size.dispatchEvent(new Event("input")); });
+      const size = numberSlider({ min: 0.4, max: 3, step: 0.05, value: s.scale ?? 1, unit: "%", label: "Size of this line (percent)",
+        toDisplay: (v) => v * 100, fromDisplay: (d) => d / 100,
+        onInput: (v) => update((q) => (q.subtitles.find((x) => x.id === s.id).scale = Math.abs(v - 1) < 0.001 ? null : v), "subs-pos") });
+      size.root.title = "Size of this line only (double-click to reset)";
+      size.root.addEventListener("dblclick", () => (size.sync(1), update((q) => (q.subtitles.find((x) => x.id === s.id).scale = null), "subs-pos")));
+      // position as typed percentages of the frame; empty = the style's default position
+      const pos = (axis) => {
+        const input = el("input", { type: "number", class: "num", min: 0, max: 100, step: 1, placeholder: "auto", "aria-label": `${axis === "x" ? "Horizontal" : "Vertical"} position of this line (percent)` });
+        if (s[axis] != null) input.value = String(Math.round(s[axis] * 100));
+        input.addEventListener("change", () => {
+          const d = parseFloat(input.value);
+          update((q) => { const t = q.subtitles.find((x) => x.id === s.id); t[axis] = Number.isFinite(d) ? Math.min(1, Math.max(0, d / 100)) : null; }, "subs-pos");
+        });
+        toolRefs.set(`${s.id}:${axis}`, { input, axis, id: s.id });
+        return input;
+      };
+      toolRefs.set(`${s.id}:size`, { size, id: s.id });
       ta.addEventListener("input", () => {
         count.textContent = `${charCount(ta.value)} chars`;
         update((q) => (q.subtitles.find((x) => x.id === s.id).text = ta.value), "subs-text");
@@ -208,7 +243,9 @@ export function initSubtitles() {
         ta,
         el("button", { class: "ghost icon", title: "Delete this subtitle", onclick: () => update((q) => (q.subtitles = q.subtitles.filter((x) => x.id !== s.id)), "subs") }, "✕"),
         span ? "" : el("span", { class: "muted small" }, "Inside a cut section, so it won't be exported"),
-        el("div", { class: "sub-tools" }, count, size, sizeLabel,
+        el("div", { class: "sub-tools" }, count, size.root),
+        el("div", { class: "sub-tools" }, el("span", { class: "muted small" }, "X"), pos("x"), el("span", { class: "muted small" }, "Y"), pos("y"),
+          el("button", { class: "ghost small", title: "Back to the style's position and size", onclick: () => update((q) => { const t = q.subtitles.find((x) => x.id === s.id); t.x = t.y = t.scale = null; }, "subs") }, "Reset"),
           el("button", { class: "ghost small", title: "Break this line at the text cursor", onclick: () => splitAt(s.id, ta.selectionStart) }, "Split"),
           next ? el("button", { class: "ghost small", title: "Join with the next line", onclick: () => mergeWithNext(s.id, next.id) }, "Merge ↓") : ""));
     }) : [el("p", { class: "muted small" }, "No subtitles yet. Set In/Out, then click “Generate subtitles”")]));
@@ -217,7 +254,9 @@ export function initSubtitles() {
     if (why === "select") {
       // only restyle: rebuilding the list here would destroy the textarea that was just focused
       list.querySelectorAll(".sub-row").forEach((r) => r.classList.toggle("selected", r.dataset.id === ui.selectedSubId));
-    } else if (why !== "subs-text" && why !== "subs-pos" && !why.startsWith("ov-")) render();
+    } else if (why === "subs-pos") {
+      syncTools();
+    } else if (why !== "subs-text" && !why.startsWith("ov-")) render();
   });
   render();
   setSubtitleLane(paintLane, laneHandler);
