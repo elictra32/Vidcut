@@ -1,6 +1,7 @@
 // Colour correction of a clip for the preview: the same numbers as core/grade.py, turned into an SVG colour matrix
 // that is applied to the <video> as a CSS filter (tests/fixtures/grade_cases.json keeps the two in step).
 const LIMIT = 100;
+const BRIGHT_SCALE = 255 / 219; // eq brightness is in full-range code values, the picture is limited range
 const clamp = (v) => Math.max(-LIMIT, Math.min(LIMIT, Number(v) || 0));
 
 export const NEUTRAL = { temperature: 0, tint: 0, brightness: 0, contrast: 0, saturation: 0 };
@@ -12,19 +13,23 @@ export function gradeParams(g) {
     brightness: 0.25 * clamp(g?.brightness) / LIMIT, contrast: 1 + 0.5 * clamp(g?.contrast) / LIMIT, saturation: 1 + clamp(g?.saturation) / LIMIT };
 }
 
-/** 4x5 feColorMatrix values: channel gains, then saturation (BT.601 luma), then contrast around mid grey and brightness. */
+/**
+ * 4x5 feColorMatrix values. Same order as the export: channel gains, saturation (chroma only, luma kept), then contrast
+ * and brightness on the LUMA only around mid grey (ffmpeg eq works on Y and chroma, not on R, G, B separately).
+ */
 export function gradeMatrix(g) {
   const p = gradeParams(g);
   const gain = [p.r, p.g, p.b];
-  const W = [0.299, 0.587, 0.114];
+  const W = [0.2126, 0.7152, 0.0722]; // BT.709 luma, as for HD footage
+  const luma = W.map((w, j) => w * gain[j]); // luma after the gains; saturation keeps it
   const rows = [];
   for (let i = 0; i < 3; i++) {
     const row = [];
     for (let j = 0; j < 3; j++) {
       const sat = (i === j ? p.saturation : 0) + (1 - p.saturation) * W[j];
-      row.push(p.contrast * sat * gain[j]);
+      row.push(sat * gain[j] + (p.contrast - 1) * luma[j]);
     }
-    rows.push([...row, 0, 0.5 * (1 - p.contrast) + p.brightness]);
+    rows.push([...row, 0, p.brightness * BRIGHT_SCALE - 0.5 * (p.contrast - 1)]);
   }
   rows.push([0, 0, 0, 1, 0]);
   return rows.flat();
