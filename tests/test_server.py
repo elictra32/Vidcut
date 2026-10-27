@@ -662,3 +662,27 @@ def test_episode_export_writes_numbered_files_each_with_its_own_intro_and_the_ou
     assert not any(f["over_limit"] for f in files)
     durs = [media.probe(os.path.join(out, f["video"]))["duration"] for f in files]
     assert durs[0] == pytest.approx(30 + 2 + 1, abs=0.6) and durs[1] == pytest.approx(30 + 3 + 1, abs=0.6)
+
+
+# ---- highlights ---------------------------------------------------------------------------------------------
+def _subs_project(client, tmp_path, texts):
+    cid = add_clip(client, make_clip(str(tmp_path / "h.mp4"), [("tone", 60)], size="320x180"))["clip"]["id"]
+    subs = [{"id": f"s{i}", "clip_id": cid, "src_start": i * 3.0, "src_end": i * 3.0 + 2.5, "text": t, "x": None, "y": None}
+            for i, t in enumerate(texts)]
+    put_project(client, subtitles=subs)
+
+
+def test_highlights_need_subtitles(client, tmp_path):
+    add_clip(client, make_clip(str(tmp_path / "h.mp4"), [("tone", 5)], size="320x180"))
+    assert client.post("/api/highlights", json={}).json()["error"]["code"] == "no_subtitles"
+    assert client.get("/api/highlights/transcript").json()["error"]["code"] == "no_subtitles"
+
+
+def test_highlights_find_the_scolding_part_and_export_a_transcript(client, tmp_path):
+    texts = ["เรียนเรื่องภาษี"] * 8 + ["ไอ้โง่ ไม่ได้เรื่อง", "ขี้เกียจ น่าอาย"] + ["เรียนต่อ"] * 8
+    _subs_project(client, tmp_path, texts)
+    r = client.post("/api/highlights", json={"min_s": 15, "max_s": 30}).json()
+    scold = [c for c in r["candidates"] if c["category"] == "scold"]
+    assert scold and scold[0]["start"] <= 24 and scold[0]["end"] >= 30 and "scold" in r["lexicon"]
+    t = client.get("/api/highlights/transcript").json()
+    assert t["lines"] == len(texts) and "[00:24]" in t["text"]

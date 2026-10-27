@@ -12,6 +12,7 @@ import { initStylePanel } from "./style_panel.js";
 import { initExportPanel } from "./export_panel.js";
 import { initOverlays } from "./overlays.js";
 import { initEpisodes } from "./episodes.js";
+import { initHighlights } from "./highlights.js";
 import { $ } from "./util.js";
 
 async function main() {
@@ -22,6 +23,7 @@ async function main() {
   initTransport();
   initStage();
   initSubtitles();
+  initHighlights();
   initStylePanel();
   initOverlays();
   initExportPanel();

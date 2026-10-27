@@ -32,7 +32,9 @@ from core.silence import detect_silences, keeps_from_silences
 from core.timeline import cut_points, edited_duration, enabled_keeps
 from core.srt import parse_srt
 from core.srt_import import cues_to_subtitles
-from core.waveform import waveform_peaks
+from core.highlights import LEXICON, find_highlights, lines_from_project, transcript_for_ai
+from core.timeline import main_clips
+from core.waveform import loudness_by_second, waveform_peaks
 from server import fake_whisper
 from server.errors import AppError, from_exception, payload
 from server.jobs import JobRunner
@@ -54,6 +56,7 @@ class State:
         self.project = load_project(home)
         self.jobs = JobRunner()
         self.waveforms: dict = {}
+        self.loudness: dict = {}
 
     def save(self):
         with self.lock:
@@ -305,6 +308,48 @@ def create_app(home: str | None = None) -> FastAPI:
         if o is None or not os.path.isfile(o.path):
             raise AppError("file_missing", "Image not found", status=404)
         return FileResponse(o.path, media_type=mimetypes.guess_type(o.path)[0] or "image/png")
+
+    # ---- highlights ----------------------------------------------------------------------------
+    def edited_loudness(snap: Project) -> list[float]:
+        """RMS per second along the edited timeline (approximate to the second)."""
+        out: list[float] = []
+        for c in main_clips(snap.clips):
+            key = (c.id, c.path)
+            if key not in st.loudness:
+                st.loudness[key] = loudness_by_second(c.path)
+            per_s = st.loudness[key]
+            for k in enabled_keeps(c):
+                out += per_s[int(k.start): max(int(k.start) + 1, int(round(k.end)))]
+        return out
+
+    @app.post("/api/highlights")
+    def post_highlights(body: dict | None = None):
+        body = body or {}
+        with st.lock:
+            snap = copy.deepcopy(st.project)
+        lines = lines_from_project(snap.clips, snap.subtitles)
+        if not lines:
+            raise AppError("no_subtitles", "There are no subtitles to analyse",
+                           "Generate or import subtitles first (for the part you want to scan)")
+        lexicon = {k: [str(w) for w in v] for k, v in (body.get("lexicon") or {}).items() if k in LEXICON}
+        cands = find_highlights(lines, edited_loudness(snap), min_s=float(body.get("min_s", 30)), max_s=float(body.get("max_s", 90)),
+                                per_category=int(body.get("per_category", 5)), lexicon=lexicon or None)
+        return {"candidates": [{"start": c.start, "end": c.end, "duration": c.duration, "category": c.category, "label": c.label,
+                                "score": round(c.score, 2), "hits": c.hits, "text": c.text[:160]} for c in cands],
+                "lexicon": {k: lexicon.get(k, LEXICON[k]) for k in LEXICON}}
+
+    @app.get("/api/highlights/lexicon")
+    def get_highlights_lexicon():
+        return {"lexicon": LEXICON}
+
+    @app.get("/api/highlights/transcript")
+    def get_highlights_transcript():
+        with st.lock:
+            snap = copy.deepcopy(st.project)
+        lines = lines_from_project(snap.clips, snap.subtitles)
+        if not lines:
+            raise AppError("no_subtitles", "There are no subtitles to export", "Generate or import subtitles first")
+        return {"text": transcript_for_ai(lines), "lines": len(lines)}
 
     # ---- subtitles from an SRT file (e.g. YouTube auto captions) -----------------------------
     @app.post("/api/subtitles/import-srt")

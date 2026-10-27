@@ -147,3 +147,7 @@ button.danger { color: #ff8a8a; }
 .ep-table th, .ep-table td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--border, #333); }
 .ep-intro { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ep-file.over { color: #ff8a8a; }
+.hl-row { border-top: 1px solid var(--border, #333); padding: 6px 0; }
+.hl-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hl-words textarea { width: 100%; }
+#hl-answer { width: 100%; }
