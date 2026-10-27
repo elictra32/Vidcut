@@ -23,6 +23,7 @@ from core import media
 from core.autosub import generate_subtitles
 from core.encode import AUDIO_KBPS, _normalized, estimate_bytes, source_video_kbps, video_kbps
 from core.align import align as align_audio
+from core.cover import CoverError, render_cover, safe_stem, thai_date
 from core.cutmap import pieces_from_dicts
 from core.episodes import plan_episodes
 from core.export import export_duration, manifest_path, render_preview_frame, run_export
@@ -55,6 +56,7 @@ class State:
         self.home = home
         self.exports = os.path.join(home, "exports")
         self.proxies = os.path.join(home, "proxies")
+        self.covers = os.path.join(home, "covers")
         self.lock = threading.RLock()
         self.project = load_project(home)
         self.jobs = JobRunner()
@@ -480,6 +482,67 @@ def create_app(home: str | None = None) -> FastAPI:
             return {"video": os.path.basename(res.video), "srt": os.path.basename(res.srt), "dir": out_dir,
                     "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
         return {"job": st.jobs.submit(work, "export")}
+
+    # ---- episode covers made from the THUS intro template ------------------------------------------
+    @app.post("/api/covers")
+    def post_covers(body: dict):
+        """Make one intro clip per title from a template cover, add them as Intro clips (in order)."""
+        items = body.get("items") or []
+        if not (1 <= len(items) <= 50):
+            raise AppError("covers_invalid", "Give between 1 and 50 titles")
+        titles = []
+        for it in items:
+            t = " ".join(str(it.get("title", "")).split())
+            if not t or len(t) > 120:
+                raise AppError("covers_invalid", "Each title must be 1–120 characters")
+            titles.append((t, str(it.get("date_text") or "").strip()))
+        if body.get("template_clip_id"):
+            template = st.clip(str(body["template_clip_id"])).path
+        else:
+            template = os.path.abspath(str(body.get("template_path", "")))
+        if not os.path.isfile(template):
+            raise AppError("file_missing", "Template file not found", "Choose the cover clip to copy the look from", template, status=404)
+        default_date = str(body.get("date_text") or "").strip()
+        if not default_date:
+            import datetime
+            try:
+                d = datetime.date.fromisoformat(str(body.get("date") or "")) if body.get("date") else datetime.date.today()
+            except ValueError as e:
+                raise AppError("covers_invalid", "The date is not valid", "Use the date picker or type the date text") from e
+            default_date = thai_date(d.year, d.month, d.day)
+        title_font, date_font = str(body.get("title_font") or "Montserrat"), str(body.get("date_font") or "Sarabun")
+        replace = bool(body.get("replace_intros", True))
+
+        def work(progress, cancel):
+            os.makedirs(st.covers, exist_ok=True)
+            made = []
+            for i, (title, date_text) in enumerate(titles):
+                progress(i / len(titles), f"Cover {i + 1}/{len(titles)}: {title}")
+                stem, n = safe_stem(title), 1
+                while os.path.exists(os.path.join(st.covers, f"{stem}{'' if n == 1 else f'_{n}'}.mp4")):
+                    n += 1
+                out = os.path.join(st.covers, f"{stem}{'' if n == 1 else f'_{n}'}.mp4")
+                try:
+                    render_cover(template, title, date_text or default_date, out, title_font=title_font, date_font=date_font, cancel=cancel)
+                except CoverError as e:
+                    raise AppError(e.code, e.message, "", e.details) from e
+                made.append(out)
+            clips = []
+            for out in made:
+                info = probe(out)
+                clips.append(Clip(id=uuid.uuid4().hex[:8], path=out, duration=info["duration"], width=info["width"], height=info["height"],
+                                  fps=info["fps"], has_audio=info["has_audio"], keeps=[Keep(0.0, info["duration"])], role="intro"))
+            with st.lock:
+                if replace:
+                    gone = {c.id for c in st.project.clips if c.role == "intro"}
+                    st.project.clips = [c for c in st.project.clips if c.id not in gone]
+                    st.project.subtitles = [s for s in st.project.subtitles if s.clip_id not in gone]
+                st.project.clips.extend(clips)
+                st.project.rev += 1
+                st.save()
+            progress(1.0, "Done")
+            return {"count": len(clips), "dir": st.covers, "names": [os.path.basename(p) for p in made]}
+        return {"job": st.jobs.submit(work, "covers")}
 
     # ---- split into episodes (each under a size limit, own intro, shared outro) ---------------------
     def episode_plan(snap: Project, max_mb: float):

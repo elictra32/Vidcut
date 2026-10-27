@@ -55,7 +55,7 @@ def test_libass_resolves_each_offered_font_to_itself(tmp_path, family):
     for f in FONT_FILES.values():
         (tmp_path / "fonts" / f).write_bytes((FONTS_DIR / f).read_bytes())
     log = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "debug", "-f", "lavfi", "-i", "color=c=black:s=640x360:d=1",
-                          "-vf", "subtitles=t.ass:fontsdir=fonts", "-frames:v", "1", "-f", "null", "-"],
+                          "-vf", "ass=t.ass:fontsdir=fonts:shaping=complex", "-frames:v", "1", "-f", "null", "-"],
                          cwd=tmp_path, capture_output=True, text=True).stderr
     m = re.search(r"fontselect: \(([^,]+), \d+, \d+\) -> ([^,]+),", log)
     assert m, log[-500:]
@@ -89,7 +89,7 @@ def test_export_text_width_matches_css_em_size(tmp_path, family):
         (tmp_path / "fonts" / f).write_bytes((FONTS_DIR / f).read_bytes())
     out = tmp_path / "ass.png"
     subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=1080x400:d=1",
-                    "-vf", "subtitles=t.ass:fontsdir=fonts", "-frames:v", "1", str(out)], cwd=tmp_path, check=True)
+                    "-vf", "ass=t.ass:fontsdir=fonts:shaping=complex", "-frames:v", "1", str(out)], cwd=tmp_path, check=True)
     ref_w, ass_w = ink_width(ref), ink_width(out)
     assert ref_w > 300
     assert ass_w == pytest.approx(ref_w, rel=0.05), f"{family}: drawtext {ref_w}px vs ASS {ass_w}px"
@@ -99,3 +99,16 @@ def test_every_offered_font_is_declared_in_the_stylesheet():
     css = (ROOT / "web" / "style.css").read_text(encoding="utf-8")
     for family, file in FONT_FILES.items():
         assert f'font-family: "{family}"' in css and f"/fonts/{file}" in css, family
+
+
+def test_text_advance_matches_what_libass_draws(tmp_path):
+    """The width we compute from the font file must agree with the real rendering (ink width, within a few percent)."""
+    from core.fonts import text_advance
+    text = "Candlestick and Price Pattern II P1"
+    ref = tmp_path / "ref.png"
+    subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=1080x200:d=1",
+                    "-vf", f"drawtext=fontfile={ROOT / 'fonts' / 'Montserrat-Regular.ttf'}:text='{text}':fontsize=44:fontcolor=white:x=20:y=50",
+                    "-frames:v", "1", str(ref)], check=True)
+    assert text_advance("Montserrat", text, 44) == pytest.approx(ink_width(ref), rel=0.04)
+    assert text_advance("Montserrat", "", 44) == 0
+    assert text_advance("Montserrat", "ab", 44, spacing=2) == pytest.approx(text_advance("Montserrat", "ab", 44) + 4)

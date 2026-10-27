@@ -792,3 +792,43 @@ def test_rewrap_endpoint_reflows_all_subtitles_and_validates(client, tmp_path):
     assert "".join(s["text"] for s in subs) == text and subs[0]["src_start"] == 0 and subs[-1]["src_end"] == 6
     assert client.post("/api/subtitles/rewrap", json={"max_chars": 2, "max_lines": 1}).json()["error"]["code"] == "rewrap_invalid"
     assert client.post("/api/subtitles/rewrap", json={"max_chars": "x"}).json()["error"]["code"] == "rewrap_invalid"
+
+
+# ---- covers ------------------------------------------------------------------------------------------------------
+def _template(tmp_path):
+    import subprocess
+    p = str(tmp_path / "template.mp4")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x0e0023:s=1920x1080:r=30:d=3.1",
+                    "-f", "lavfi", "-i", "sine=frequency=330:duration=3.1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", p], check=True)
+    return p
+
+
+def test_covers_are_made_and_added_as_intro_clips_replacing_the_old_ones(client, tmp_path):
+    tpl = _template(tmp_path)
+    tid = add_clip(client, tpl)["clip"]["id"]
+    main = add_clip(client, make_clip(str(tmp_path / "main.mp4"), [("tone", 5)], size="320x180"))["clip"]["id"]
+    p = get_project(client)
+    for c in p["clips"]:
+        c["role"] = "intro" if c["id"] == tid else "main"
+    assert client.put("/api/project", json=p).status_code == 200
+    r = client.post("/api/covers", json={"template_clip_id": tid, "date": "2026-10-22",
+                                          "items": [{"title": "Candlestick and Price Pattern II P1"}, {"title": "Trading Record Part 1", "date_text": "วันที่ 23 กันยายน  2569"}]})
+    assert r.status_code == 200, r.text
+    j = wait_job(client, r.json()["job"], timeout=200)
+    assert j["state"] == "done", j
+    assert j["result"]["names"] == ["Candlestick and Price Pattern II P1.mp4", "Trading Record Part 1.mp4"]
+    clips = get_project(client)["clips"]
+    intros = [c for c in clips if c["role"] == "intro"]
+    assert [os.path.basename(c["path"]) for c in intros] == j["result"]["names"]  # the old template intro was replaced, in order
+    assert any(c["id"] == main and c["role"] == "main" for c in clips)
+    assert all(abs(c["duration"] - 3.1) < 0.2 for c in intros)
+
+
+def test_covers_validate_their_input(client, tmp_path):
+    tpl = _template(tmp_path)
+    assert client.post("/api/covers", json={"template_path": tpl, "items": []}).json()["error"]["code"] == "covers_invalid"
+    assert client.post("/api/covers", json={"template_path": tpl, "items": [{"title": "  "}]}).json()["error"]["code"] == "covers_invalid"
+    assert client.post("/api/covers", json={"template_path": str(tmp_path / "nope.mp4"), "items": [{"title": "x"}]}).json()["error"]["code"] == "file_missing"
+    assert client.post("/api/covers", json={"template_path": tpl, "date": "garbage", "items": [{"title": "x"}]}).json()["error"]["code"] == "covers_invalid"
+    bad = client.post("/api/covers", json={"template_path": make_clip(str(tmp_path / "s.mp4"), [("tone", 3)], size="320x180"), "items": [{"title": "x"}]}).json()["job"]
+    assert wait_job(client, bad)["error"]["code"] == "template_mismatch"

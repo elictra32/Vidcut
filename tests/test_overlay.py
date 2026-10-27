@@ -32,7 +32,7 @@ def test_filter_graph_puts_overlay_before_subtitles():
     clip = Clip("c1", "/a.mp4", 4, 640, 360, 25, True, keeps=[Keep(0, 4)])
     g = build_filter_graph([clip], [Piece("c1", 0, 2, 0.0)], PRESETS["tiktok"], "subs.ass",
                            overlays=[Overlay("o1", "/logo.png")])
-    assert g.index("overlay=") < g.index("subtitles=")
+    assert g.index("overlay=") < g.index("ass=subs.ass")
 
 
 def _project(tmp_path, logo):

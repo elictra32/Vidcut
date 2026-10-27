@@ -40,7 +40,7 @@ def test_filter_graph_concat_and_relative_subtitles():
     pieces = [Piece("c1", 2, 4, 0), Piece("c1", 6, 8, 2)]
     g = build_filter_graph([fake_clip()], pieces, PRESETS["tiktok"], "subs.ass")
     assert "concat=n=2" in g
-    assert "subtitles=subs.ass:fontsdir=fonts" in g
+    assert "ass=subs.ass:fontsdir=fonts:shaping=complex" in g
     assert "/abs/in" not in g and ":\\" not in g
 
 
@@ -343,3 +343,29 @@ def test_reveal_changes_what_the_exported_frame_shows_over_time(tmp_path):
     render_preview_frame(plain, 3.8, full)
     assert open(early, "rb").read() != open(late, "rb").read()   # the early frame shows less text
     assert open(late, "rb").read() == open(full, "rb").read()     # by the end the line equals the non-reveal rendering
+
+
+@pytest.mark.skipif(not has_libass(), reason="ffmpeg without libass")
+@pytest.mark.parametrize("font", ["Sarabun", "Prompt"])
+def test_thai_tone_marks_over_upper_vowels_are_drawn_above_them(tmp_path, font):
+    """With libass's default (simple) shaping the tone mark of 'ที่' lands inside the vowel and vanishes; the export must
+    use complex shaping so it stacks above, making the line taller than 'ที'."""
+    from core.models import SubtitleStyle
+    path = make_clip(str(tmp_path / "t.mp4"), [("tone", 2)], size="640x360")
+    clip = Clip("c1", path, 2, 640, 360, 25, True, keeps=[Keep(0, 2)])
+
+    def frame(subs):
+        proj = Project(clips=[clip], subtitles=subs, style=SubtitleStyle(font=font, size=160, default_x=0.5, default_y=0.5))
+        png = str(tmp_path / f"f_{len(subs)}_{abs(hash(subs[0].text)) if subs else 0}.png")
+        render_preview_frame(proj, 0.5, png)
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", png, "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True).stdout
+        import numpy as np
+        return np.frombuffer(raw, dtype=np.uint8).reshape(1920, 1080).astype(int)
+
+    base = frame([])
+
+    def top_ink_row(text):  # the highest row where the subtitle changed the picture
+        import numpy as np
+        changed = np.abs(frame([Subtitle("s", "c1", 0.0, 2.0, text)]) - base) > 60
+        return int(np.where(changed.any(axis=1))[0].min())
+    assert top_ink_row("ที่") < top_ink_row("ที") - 8

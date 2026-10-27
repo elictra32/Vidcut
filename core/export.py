@@ -117,7 +117,7 @@ def build_filter_graph(clips: list[Clip], pieces: list[Piece], preset: Preset, a
     if ass_name:
         stmts.append(f"{concat_in}concat=n={len(pieces)}:v=1:a={a_flag}[vc]{a_out}")
         stmts += ov
-        stmts.append(f"[{label}]subtitles={ass_name}:fontsdir=fonts[vout]")
+        stmts.append(f"[{label}]{ASS_FILTER.format(name=ass_name)}[vout]")
     elif ov:
         stmts.append(f"{concat_in}concat=n={len(pieces)}:v=1:a={a_flag}[vc]{a_out}")
         stmts += ov
@@ -200,6 +200,10 @@ def _prepare(project: Project, selection: Selection, with_extras: bool = True, i
                 for a, b, s in subtitles_for_export(project.clips, project.subtitles, selection)]
     return preset, pieces, rendered
 
+
+# `ass` instead of `subtitles`: only `ass` can ask libass for complex (OpenType) shaping. With the default shaper Thai
+# tone marks above an upper vowel (ที่ นี้ ...) land inside the vowel and disappear.
+ASS_FILTER = "ass={name}:fontsdir=fonts:shaping=complex"
 
 MANIFEST_SUFFIX = ".vidcut.json"
 
@@ -310,7 +314,7 @@ def run_export(project: Project, out_dir: str, progress_cb=None, cancel_event=No
             for o in project.overlays:
                 final += ["-loop", "1", "-t", _fmt(total + 1.0), "-i", o.path]
             ov, label = overlay_statements(project.overlays, 1, "vc", preset.width, preset.height)
-            graph = ";".join(["[0:v]null[vc]", *ov, f"[{label}]subtitles=subs.ass:fontsdir=fonts[vout]"])
+            graph = ";".join(["[0:v]null[vc]", *ov, f"[{label}]{ASS_FILTER.format(name='subs.ass')}[vout]"])
             final += ["-filter_complex", graph, "-map", "[vout]", "-map", "0:a?", *encoder, out_name]
             _ffmpeg(final, total, lambda f, m="": report(0.8 + 0.2 * f, m), cancel_event, wd)
         os.makedirs(out_dir, exist_ok=True)

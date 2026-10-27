@@ -101,6 +101,28 @@ tokens through the same `tokens_to_words` + `build_lines` as Whisper output. Tim
 video, which is exactly what subtitles are anchored to, so later cuts need no remapping. Only that clip's subtitles
 are replaced. Checked against a real 92-minute, 1,610-cue Thai file (0.5 s to convert, no overlaps).
 
+## Later additions (short notes)
+
+- **Thai shaping in export**: libass is run through the `ass` filter with `shaping=complex` (`core/export.ASS_FILTER`).
+  The `subtitles` filter has no such option and its default shaper puts a tone mark above an upper vowel (ที่ นี้) inside
+  the vowel, where it vanishes. Regression test: `test_thai_tone_marks_over_upper_vowels_are_drawn_above_them`.
+- **Quality**: `core/encode.py` caps the bitrate at a share of the source's (`source_video_kbps`), and `auto` is constant
+  quality (CRF) with that cap. Episode planning (`core/episodes.py`) picks the fewest episodes that stay above a quality
+  floor, cut at dead-air boundaries; `run_export` takes `selection`, `intro_ids`, `name_suffix`, `max_video_kbps`.
+- **Overlays** (`Overlay` in `core/models.py`, `overlay_statements` in `core/export.py`): images laid over the video before
+  the subtitles; times are seconds in the exported file.
+- **Captions for a cut video**: an export writes `<name>.vidcut.json` (which source ranges went where). Without it,
+  `core/align.py` matches the cut video's audio against the original (spectral shapes, normalised cross-correlation,
+  monotonic offsets, frame-level change points). `core/cutmap.py` then maps caption times (used by `srt_import`).
+  Checked on synthetic audio only.
+- **Highlights** (`core/highlights.py`): word lists + loudness over windows of whole subtitle lines; the transcript export
+  and `web/ranges.js` hand the judgement of meaning to an AI.
+- **Undo/redo** lives in `web/state.js` (snapshots of what the page owns; server-side changes are caught in `loadProject`).
+- **Covers** (`core/cover.py`): the THUS intro template is reused (logo, background, audio); the old text area is filled in
+  with ffmpeg `delogo`, then a new title (Montserrat, brand typeface) and date are drawn with libass using timing and
+  positions measured from the sample covers (`Profile`). The LIVE badge is cut out of the template. Montserrat Regular/Medium
+  in `fonts/` are static instances of the brand's variable font (made once with fontTools' instancer; OFL).
+
 ## Adding an LLM step later (typo fixing, bad-take removal)
 
 Keep it optional and text-only. Add `core/llm.py` with a function over `list[Subtitle]` (text in, text out, user-supplied

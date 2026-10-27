@@ -13,10 +13,12 @@ import { initExportPanel } from "./export_panel.js";
 import { initOverlays } from "./overlays.js";
 import { initEpisodes } from "./episodes.js";
 import { initHighlights } from "./highlights.js";
+import { initCovers } from "./covers.js";
 import { $ } from "./util.js";
 
 async function main() {
   initClipsPanel();
+  initCovers();
   initSilencePanel();
   initCutStrip();
   initTimelineView();
