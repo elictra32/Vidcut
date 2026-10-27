@@ -6,6 +6,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from core import media
 from core.models import Clip, Keep, Project
 from server import app as app_module
 from server.app import create_app
@@ -618,3 +619,46 @@ def test_overlay_rejects_non_images_and_missing_files(client, tmp_path):
 def test_overlay_picker_override(client, tmp_path, monkeypatch):
     monkeypatch.setenv("VIDCUT_PICK_IMAGE_OVERRIDE", _logo(tmp_path))
     assert client.post("/api/overlays/pick").json()["overlay"]["path"].endswith("logo.png")
+
+
+# ---- episodes ----------------------------------------------------------------------------------------------
+def _episode_project(client, tmp_path):
+    main = add_clip(client, make_clip(str(tmp_path / "main.mp4"), [("tone", 60)], size="320x180"))["clip"]["id"]
+    i1 = add_clip(client, make_clip(str(tmp_path / "i1.mp4"), [("tone", 2)], size="320x180"))["clip"]["id"]
+    i2 = add_clip(client, make_clip(str(tmp_path / "i2.mp4"), [("tone", 3)], size="320x180"))["clip"]["id"]
+    out = add_clip(client, make_clip(str(tmp_path / "out.mp4"), [("tone", 1)], size="320x180"))["clip"]["id"]
+    p = get_project(client)
+    roles = {i1: "intro", i2: "intro", out: "outro"}
+    for c in p["clips"]:
+        c["role"] = roles.get(c["id"], "main")
+    assert client.put("/api/project", json=p).status_code == 200
+    return main, i1, i2, out
+
+
+def test_episode_plan_splits_by_size_and_assigns_intros(client, tmp_path):
+    _, i1, i2, _ = _episode_project(client, tmp_path)
+    r = client.post("/api/episodes/plan", json={"max_mb": 5}).json()
+    eps = r["episodes"]
+    assert len(eps) == 2 and r["intro_clips"] == 2 and not r["intro_reused"]
+    assert eps[0]["start"] == 0 and eps[0]["end"] == eps[1]["start"] and eps[1]["end"] == pytest.approx(60, abs=0.5)
+    assert [e["intro_clip_id"] for e in eps] == [i1, i2]
+    assert all(e["est_bytes"] <= 5 * 1048576 for e in eps)
+
+
+def test_episode_limit_too_small_is_a_clear_error(client, tmp_path):
+    _episode_project(client, tmp_path)
+    assert client.post("/api/episodes/plan", json={"max_mb": 1}).json()["error"]["code"] == "episode_limit_too_small"
+
+
+def test_episode_export_writes_numbered_files_each_with_its_own_intro_and_the_outro(client, tmp_path):
+    _episode_project(client, tmp_path)
+    out = str(tmp_path / "eps")
+    assert client.post("/api/export-folder", json={"path": out}).status_code == 200
+    job = client.post("/api/episodes/export", json={"max_mb": 5}).json()["job"]
+    j = wait_job(client, job, timeout=200)
+    assert j["state"] == "done", j
+    files = j["result"]["files"]
+    assert [f["video"] for f in files] == ["main_tiktok_EP01.mp4", "main_tiktok_EP02.mp4"]
+    assert not any(f["over_limit"] for f in files)
+    durs = [media.probe(os.path.join(out, f["video"]))["duration"] for f in files]
+    assert durs[0] == pytest.approx(30 + 2 + 1, abs=0.6) and durs[1] == pytest.approx(30 + 3 + 1, abs=0.6)

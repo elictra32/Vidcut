@@ -11,6 +11,7 @@ import { initSubtitles } from "./subtitles.js";
 import { initStylePanel } from "./style_panel.js";
 import { initExportPanel } from "./export_panel.js";
 import { initOverlays } from "./overlays.js";
+import { initEpisodes } from "./episodes.js";
 import { $ } from "./util.js";
 
 async function main() {
@@ -24,6 +25,7 @@ async function main() {
   initStylePanel();
   initOverlays();
   initExportPanel();
+  initEpisodes();
   $("#btn-add").addEventListener("click", addClipFromDialog);
   $("#btn-add-path").addEventListener("click", () => addClipFromPath($("#path-input").value));
   $("#path-input").addEventListener("keydown", (e) => e.key === "Enter" && addClipFromPath(e.target.value));

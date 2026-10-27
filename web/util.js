@@ -47,3 +47,11 @@ export function el(tag, attrs = {}, ...children) {
   for (const c of children.flat()) node.append(c instanceof Node ? c : document.createTextNode(c ?? ""));
   return node;
 }
+
+export function remember(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* storage blocked: the choice just isn't remembered */ }
+}
+export function recall(key, fallback) {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+

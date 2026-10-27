@@ -6,7 +6,7 @@ import { showError, showToast } from "./toast.js";
 import * as tm from "./timeline_math.js";
 import * as player from "./player.js";
 import { LANE_TOP, setSubtitleLane, timeAtX } from "./timeline_view.js";
-import { $, basename, cssVar, el, fmtTime } from "./util.js";
+import { $, basename, cssVar, el, fmtTime, recall, remember } from "./util.js";
 
 const MODELS = {
   "large-v3": "Most accurate · first use downloads about 3 GB · slowest on CPU",
@@ -14,13 +14,6 @@ const MODELS = {
   small: "Fastest · about 500 MB download · less accurate",
 };
 const spanOf = (s) => tm.subtitleEditedSpan(getProject().clips, s);
-
-function remember(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* storage blocked: the choice just isn't remembered */ }
-}
-function recall(key, fallback) {
-  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
-}
 
 async function generate(model) {
   const p = getProject();

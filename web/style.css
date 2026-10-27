@@ -143,3 +143,7 @@ button.danger { color: #ff8a8a; }
 .ov-thumb { width: 36px; height: 36px; object-fit: contain; background: #0003; border-radius: 4px; }
 .ov-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
 .ov-time { width: 80px; }
+.ep-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.ep-table th, .ep-table td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--border, #333); }
+.ep-intro { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-file.over { color: #ff8a8a; }

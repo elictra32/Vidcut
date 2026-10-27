@@ -22,12 +22,14 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from core import media
 from core.autosub import generate_subtitles
 from core.encode import AUDIO_KBPS, _normalized, estimate_bytes, source_video_kbps, video_kbps
+from core.episodes import plan_episodes
 from core.export import export_duration, render_preview_frame, run_export
 from core.fonts import FONT_FILES
 from core.media import FFmpegError, is_browser_playable, make_proxy, probe
 from core.models import ROLES, Clip, Keep, Overlay, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
+from core.timeline import cut_points, edited_duration, enabled_keeps
 from core.srt import parse_srt
 from core.srt_import import cues_to_subtitles
 from core.waveform import waveform_peaks
@@ -367,6 +369,68 @@ def create_app(home: str | None = None) -> FastAPI:
         def work(progress, cancel):
             res = run_export(snap, out_dir, progress, cancel)
             return {"video": os.path.basename(res.video), "srt": os.path.basename(res.srt), "dir": out_dir,
+                    "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
+        return {"job": st.jobs.submit(work, "export")}
+
+    # ---- split into episodes (each under a size limit, own intro, shared outro) ---------------------
+    def episode_plan(snap: Project, max_mb: float):
+        if max_mb < 5:
+            raise AppError("episode_limit_too_small", "The size limit is too small", "Use at least 5 MB per episode")
+        sel = snap.selection or Selection(0.0, edited_duration(snap.clips))
+        if sel.end - sel.start <= 0:
+            raise AppError("no_clips", "No clips in the project", "Add a clip first")
+
+        def length(c):
+            return sum(k.end - k.start for k in enabled_keeps(c))
+        intros = [(c.id, length(c)) for c in snap.clips if c.role == "intro" and length(c) > 0]
+        outro = sum(length(c) for c in snap.clips if c.role == "outro")
+        try:
+            eps = plan_episodes(cut_points(snap.clips), sel.start, sel.end, max_bytes=max_mb * 1048576,
+                                source_kbps=source_video_kbps(snap.clips), preset=snap.preset,
+                                container=_normalized(snap.export).container, intros=intros, outro_dur=outro)
+        except ValueError as e:
+            raise AppError("episode_limit_too_small", "The size limit is too small for these intro/outro clips",
+                           "Raise the limit or use shorter intro/outro clips") from e
+        return eps, len(intros)
+
+    def episode_json(e) -> dict:
+        return {"index": e.index, "start": e.start, "end": e.end, "duration": e.duration, "intro_clip_id": e.intro_clip_id,
+                "video_kbps": e.video_kbps, "est_bytes": e.est_bytes}
+
+    @app.post("/api/episodes/plan")
+    def post_episodes_plan(body: dict | None = None):
+        max_mb = float((body or {}).get("max_mb", 500))
+        with st.lock:
+            snap = copy.deepcopy(st.project)
+        eps, n_intros = episode_plan(snap, max_mb)
+        return {"episodes": [episode_json(e) for e in eps], "intro_clips": n_intros,
+                "intro_reused": n_intros > 0 and n_intros < len(eps)}
+
+    @app.post("/api/episodes/export")
+    def post_episodes_export(body: dict | None = None):
+        max_mb = float((body or {}).get("max_mb", 500))
+        with st.lock:
+            snap = copy.deepcopy(st.project)
+        eps, _ = episode_plan(snap, max_mb)
+        snap.export.quality = "auto"  # constant quality, capped per episode so each stays under the limit
+        out_dir = snap.export.out_dir or st.exports
+
+        def work(progress, cancel):
+            files = []
+            total = sum(e.duration for e in eps)
+            done = 0.0
+            for e in eps:
+                base, span = done / total, e.duration / total
+
+                def report(f, m="", base=base, span=span, e=e):
+                    progress(base + span * f, f"Episode {e.index}/{len(eps)} · {m}" if m else f"Episode {e.index}/{len(eps)}")
+                res = run_export(snap, out_dir, report, cancel, selection=Selection(e.start, e.end),
+                                 intro_ids=[e.intro_clip_id] if e.intro_clip_id else None,
+                                 name_suffix=f"_EP{e.index:02d}", max_video_kbps=e.video_kbps)
+                size = os.path.getsize(res.video)
+                files.append({"video": os.path.basename(res.video), "bytes": size, "over_limit": size > max_mb * 1048576})
+                done += e.duration
+            return {"files": files, "dir": out_dir, "limit_mb": max_mb,
                     "downloadable": os.path.abspath(out_dir) == os.path.abspath(st.exports)}
         return {"job": st.jobs.submit(work, "export")}
 
