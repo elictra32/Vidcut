@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 import webbrowser
 from urllib.parse import urlparse
@@ -49,6 +50,7 @@ HOST = "127.0.0.1"
 ALLOWED_HOSTS = ("127.0.0.1", "localhost")  # Host/Origin we answer to: blocks DNS rebinding and cross-site POSTs
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 FONTS_DIR = Path(__file__).resolve().parent.parent / "fonts"
+BRAND_LOGOS_DIR = Path(__file__).resolve().parent.parent / "assets" / "logos"
 TEMP_PREFIXES = ("vidcut_",)
 
 
@@ -63,6 +65,11 @@ class State:
         self.jobs = JobRunner()
         self.waveforms: dict = {}
         self.loudness: dict = {}
+        # desktop mode (server/desktop.py): when the window is closed and nothing is running, the server exits
+        self.started = time.time()
+        self.last_seen: float | None = None   # last ping from an open page
+        self.bye_at: float | None = None      # last time a page said it was closing
+        self.quit_requested = False
 
     def save(self):
         with self.lock:
@@ -148,6 +155,24 @@ def create_app(home: str | None = None) -> FastAPI:
             return {"project": project_to_dict(st.project),
                     "presets": {k: asdict(v) for k, v in PRESETS.items()},
                     "fonts": list(FONT_FILES)}
+
+    @app.get("/api/ping")
+    def get_ping():
+        """Pages ping every few seconds; also how a second launch learns that Vidcut is already running."""
+        st.last_seen = time.time()
+        return {"app": "vidcut", "busy": st.jobs.active(ignore=("proxy",)) > 0}
+
+    @app.post("/api/bye")
+    def post_bye():
+        st.bye_at = time.time()
+        return {"ok": True}
+
+    @app.post("/api/quit")
+    def post_quit():
+        """Quit Vidcut completely, even with jobs running (queued exports continue the next time it opens)."""
+        st.save()
+        st.quit_requested = True
+        return {"ok": True}
 
     @app.post("/api/project/beacon")
     def post_project_beacon(body: dict):
@@ -292,8 +317,21 @@ def create_app(home: str | None = None) -> FastAPI:
             st.save()
         return {"overlay": asdict(overlay), "width": info["width"], "height": info["height"]}
 
+    def brand_logo_files() -> list[str]:
+        return sorted(f for f in os.listdir(BRAND_LOGOS_DIR) if f.lower().endswith(".png") and not f.startswith("_")) if BRAND_LOGOS_DIR.is_dir() else []
+
+    @app.get("/api/brand-logos")
+    def get_brand_logos():
+        """The THUS logos shipped with Vidcut (assets/logos): file names, to offer in the Logo / photo panel."""
+        return {"files": brand_logo_files()}
+
     @app.post("/api/overlays")
     def post_overlay(body: dict):
+        if body.get("brand"):
+            name = str(body["brand"])
+            if name not in brand_logo_files():  # only the shipped files: never a path from the page
+                raise AppError("file_missing", "That logo isn't in the Vidcut logo folder", status=404)
+            return add_overlay(str(BRAND_LOGOS_DIR / name))
         return add_overlay(str(body.get("path", "")))
 
     @app.post("/api/overlays/pick")
@@ -818,6 +856,8 @@ def create_app(home: str | None = None) -> FastAPI:
                 shutil.rmtree(os.path.join(tmp, d), ignore_errors=True)
         return {"freed_bytes": freed, "skipped": skipped}
 
+    if BRAND_LOGOS_DIR.is_dir():
+        app.mount("/brand-logos", StaticFiles(directory=str(BRAND_LOGOS_DIR)), name="brand-logos")
     if FONTS_DIR.is_dir():  # bundled Thai fonts, so the browser preview matches the export
         app.mount("/fonts", StaticFiles(directory=str(FONTS_DIR)), name="fonts")
     if WEB_DIR.is_dir():

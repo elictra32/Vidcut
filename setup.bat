@@ -56,8 +56,16 @@ if errorlevel 1 goto :fail
 ".venv\Scripts\python.exe" -m pip install -e .
 if errorlevel 1 goto :fail
 
+rem --- 4) ไอคอน Vidcut บนเดสก์ท็อปและ Start menu: เปิดเหมือนโปรแกรมทั่วไป ไม่มีหน้าต่างดำ ---------
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\make_shortcut.ps1"
+if errorlevel 1 (
+  echo [!] สร้างไอคอนไม่สำเร็จ แต่ยังเปิดโปรแกรมได้ด้วยการดับเบิลคลิก Vidcut.vbs
+) else (
+  echo [OK] สร้างไอคอน Vidcut บนเดสก์ท็อปแล้ว
+)
+
 echo.
-echo ===== ติดตั้งเสร็จแล้ว ดับเบิลคลิก run.bat เพื่อเปิดโปรแกรม =====
+echo ===== ติดตั้งเสร็จแล้ว ดับเบิลคลิกไอคอน Vidcut บนเดสก์ท็อป ^(หรือ Vidcut.vbs^) เพื่อเปิดโปรแกรม =====
 echo ครั้งแรกที่ถอดเสียง โปรแกรมจะดาวน์โหลดโมเดล Whisper ใช้อินเทอร์เน็ตและพื้นที่ราว 3 GB
 pause
 exit /b 0

@@ -206,8 +206,10 @@ function saveOnClose() {
     navigator.sendBeacon("/api/project/beacon", new Blob([JSON.stringify(project)], { type: "application/json" }));
   } catch { /* nothing more can be done while closing */ }
 }
-window.addEventListener("pagehide", saveOnClose);
-document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && saveOnClose());
+if (typeof window !== "undefined") { // (not in the node tests)
+  window.addEventListener("pagehide", saveOnClose);
+  document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && saveOnClose());
+}
 
 export function setCurrentClip(id) {
   ui.currentClipId = id;

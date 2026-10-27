@@ -169,3 +169,7 @@ button.danger { color: #ff8a8a; }
 .q-error { color: #ff8a8a; }
 .q-item progress { width: 100%; }
 .q-cancelled .q-label, .q-done .q-label { opacity: 0.7; }
+.brand-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.brand-tile { width: 76px; height: 50px; padding: 4px; background: #f4f4f4; border: 1px solid var(--border, #333); border-radius: 6px; cursor: pointer; }
+.brand-tile.dark { background: #1e1e28; }
+.brand-tile img { width: 100%; height: 100%; object-fit: contain; }

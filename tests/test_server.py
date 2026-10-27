@@ -898,3 +898,13 @@ def test_beacon_saves_like_put(client, tmp_path):
     p["selection"] = {"start": 0.5, "end": 1.5}
     assert client.post("/api/project/beacon", json=p).status_code == 200
     assert get_project(client)["selection"] == {"start": 0.5, "end": 1.5}
+
+
+def test_brand_logos_are_listed_served_and_can_be_added_as_overlays(client):
+    files = client.get("/api/brand-logos").json()["files"]
+    assert "THUS_logo_white.png" in files and "THUS_symbol_gradient.png" in files and not any(f.startswith("_") for f in files)
+    assert len(files) == 18
+    assert client.get("/brand-logos/THUS_logo_white.png").status_code == 200
+    r = client.post("/api/overlays", json={"brand": "THUS_logo_white.png"})
+    assert r.status_code == 200 and r.json()["overlay"]["path"].endswith("THUS_logo_white.png")
+    assert client.post("/api/overlays", json={"brand": "../server/app.py"}).status_code == 404   # only the shipped files

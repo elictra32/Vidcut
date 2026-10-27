@@ -46,6 +46,14 @@ try {
   await page.locator(".ov-row input[type=range]").nth(1).evaluate((i) => { i.value = 0.5; i.dispatchEvent(new Event("input")); });
   await sleep(800);
   must((await saved()).opacity === 0.5, "the opacity slider is saved");
+  await page.click(".brand-logos summary");
+  await page.waitForSelector(".brand-tile", { timeout: 5000 });
+  must((await page.$$(".brand-tile")).length === 18, "the THUS logos are offered in 3 kinds x 6 colours");
+  await page.click('.brand-tile[data-file="THUS_logo_white.png"]');
+  await page.waitForFunction(() => document.querySelectorAll("#ov-layer img.ov").length === 2, null, { timeout: 8000 });
+  must((await saved()) !== undefined, "clicking a brand logo adds it to the preview");
+  await page.locator(".ov-row").nth(1).locator("button[title^='Remove']").click();
+  await page.waitForFunction(() => document.querySelectorAll("#ov-layer img.ov").length === 1, null, { timeout: 5000 });
   await page.click(".ov-row button[title^='Remove']");
   await page.waitForSelector("#ov-layer img.ov", { state: "detached", timeout: 5000 });
   must((await saved()) === undefined, "removing the image deletes it from the project");

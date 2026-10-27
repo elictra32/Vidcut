@@ -63,6 +63,16 @@ async function addImage() {
   }
 }
 
+async function addBrandLogo(name) {
+  try {
+    if (!(await flush())) return;
+    await api("POST", "/api/overlays", { brand: name });
+    await loadProject();
+  } catch (e) {
+    showError(e);
+  }
+}
+
 async function removeImage(id) {
   try {
     if (!(await flush())) return;
@@ -96,11 +106,25 @@ function seconds(value, onChange, aria) {
 export function initOverlays() {
   const root = $("#overlay-panel");
   const list = el("div", { class: "ov-list" });
+  const brandGrid = el("div", { class: "brand-grid" }, el("p", { class: "muted small" }, "Loading…"));
+  api("GET", "/api/brand-logos").then(({ files }) => {
+    // THUS_<kind>_<colour>.png: one row per kind (logo / symbol / lockup), one tile per colour
+    const kinds = new Map();
+    for (const f of files) {
+      const [, kind, colour] = /^THUS_(\w+?)_(\w+)\.png$/.exec(f) ?? [];
+      if (kind) kinds.set(kind, [...(kinds.get(kind) ?? []), { f, colour }]);
+    }
+    brandGrid.replaceChildren(...[...kinds].flatMap(([kind, items]) => [
+      el("h3", {}, { logo: "Logo", symbol: "Symbol", lockup: "Symbol + name" }[kind] ?? kind),
+      el("div", { class: "brand-row" }, items.map(({ f, colour }) => el("button", { class: `brand-tile ${["white", "orange"].includes(colour) ? "dark" : ""}`, title: `${kind} · ${colour}`,
+        "data-file": f, onclick: () => addBrandLogo(f) }, el("img", { src: `/brand-logos/${f}`, alt: `${kind} ${colour}` }))))]));
+  }).catch(() => brandGrid.replaceChildren(el("p", { class: "muted small" }, "The logo folder is not available.")));
   root.replaceChildren(
     el("h2", {}, "Logo / photo"),
     el("button", { id: "btn-add-overlay", onclick: addImage }, "+ Add image"),
     el("p", { class: "muted small" }, "PNG with a transparent background works best. Drag it on the preview; use the mouse wheel to resize."),
-    list);
+    list,
+    el("details", { class: "brand-logos" }, el("summary", {}, "THUS logos (pick a colour)"), brandGrid));
 
   const renderList = () => {
     const p = getProject();
