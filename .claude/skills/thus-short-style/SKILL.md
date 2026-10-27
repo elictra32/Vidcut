@@ -53,3 +53,4 @@ They were cut from the owner's own clips with `scripts/extract_assets.py ref/ep3
 `python .claude/skills/thus-short-style/scripts/add_cover_end.py "clip.mp4" --cover "cover.png" -o "clip_final.mp4"`
 shows the cover image full-frame for 3.1 s (silent), then the clip untouched from 0 s, then the 3.1 s end card; loudness to -16 LUFS; no title, no extra logo, no new subtitles.
 In an edl, a silent cover is `{"layout":"broll","file":"cover.png","t0":0,"t1":3.1,"silent":true}` and `"t1":"end"` means the whole file.
+`add_cover_end.py` also takes `--title "line1|line2"` (hook title for the first 5 s, `--scrim 0.6` on light footage) and `--end-card image.png` (replaces the purple card).

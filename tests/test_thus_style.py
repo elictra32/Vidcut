@@ -152,3 +152,19 @@ def test_add_cover_end_keeps_audio_in_sync_and_cover_is_silent(tmp_path):
     g = subprocess.run(["ffmpeg", "-v", "error", "-ss", "1", "-i", str(tmp_path / "out.mp4"), "-frames:v", "1", "-vf", "scale=4:4,format=rgb24", "-f", "rawvideo", "-"],
                        capture_output=True).stdout
     assert g[1] > 100 and g[0] < 60                                           # the cover is the green frame
+
+
+def test_add_cover_end_title_and_custom_end_card(tmp_path):
+    if not _libass():
+        pytest.skip("ffmpeg without libass")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0x303030:s=1080x1920:r=25:d=6.5", "-f", "lavfi", "-i", "sine=f=440:r=48000:d=6.5",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(tmp_path / "clip.mp4")], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=1080x1920", "-frames:v", "1", str(tmp_path / "card.png")], check=True)
+    r = subprocess.run([sys.executable, str(SKILL / "scripts" / "add_cover_end.py"), str(tmp_path / "clip.mp4"), "--title", "VI ปลอม", "--end-card", str(tmp_path / "card.png"),
+                        "-o", str(tmp_path / "out.mp4")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    import measure
+    m = measure.measure(str(tmp_path / "out.mp4"))
+    assert abs(m["duration"] - 9.6) < 0.1 and m["title"] is not None and 3.9 <= m["title"]["full_until_s"] <= 4.3
+    f = subprocess.run(["ffmpeg", "-v", "error", "-ss", "8.5", "-i", str(tmp_path / "out.mp4"), "-frames:v", "1", "-vf", "scale=4:4,format=rgb24", "-f", "rawvideo", "-"], capture_output=True).stdout
+    assert f[0] > 200 and f[1] < 60                                           # the custom (red) card is the ending

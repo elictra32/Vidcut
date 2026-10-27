@@ -3,6 +3,9 @@
 
   python add_cover_end.py "Short/clip.mp4" --cover "Short/vertical_covers_v2.png" -o "Short/clip_final.mp4"
   python add_cover_end.py clip.mp4 -o clip_final.mp4                 # end card only
+  python add_cover_end.py clip.mp4 --title "VI ปลอม" -o out.mp4        # hook title over the first 5 s instead of a cover image
+                                                                      # (several lines: --title "พี่โอม|บ่น"; --scrim 0.6 for light footage)
+  python add_cover_end.py clip.mp4 --end-card my_card.png -o out.mp4  # a different end card (any image, cropped to 9:16)
   options: --cover-seconds 3.1   --no-loudness-fix is not offered: the house level is -16 LUFS
 
 The cover is shown full-frame (cropped to 9:16 if needed) in silence; the clip then starts at 0 and the audio is not shifted.
@@ -23,6 +26,9 @@ def main():
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--cover", default=None)
     ap.add_argument("--cover-seconds", type=float, default=3.1)
+    ap.add_argument("--title", default=None, help="hook title, lines separated by |")
+    ap.add_argument("--scrim", type=float, default=0.0, help="dark band behind the title (0-1) for light footage")
+    ap.add_argument("--end-card", default=None, help="image used instead of the purple THUS end card")
     a = ap.parse_args()
     clip = Path(a.clip).resolve()
     if not clip.is_file():
@@ -35,6 +41,10 @@ def main():
         shots.append({"layout": "broll", "file": str(cover), "t0": 0, "t1": a.cover_seconds, "silent": True})
     shots.append({"layout": "broll", "file": str(clip), "t0": 0, "t1": "end"})
     edl = {"cams": {"top": str(clip), "bottom": str(clip)}, "audio": "bottom", "watermark": False, "shots": shots}
+    if a.title:
+        edl["title"] = {"lines": [x.strip() for x in a.title.split("|") if x.strip()], "scrim": a.scrim}
+    if a.end_card:
+        edl["end_card_png"] = str(Path(a.end_card).resolve())
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "edl.json"
         p.write_text(json.dumps(edl), encoding="utf-8")
