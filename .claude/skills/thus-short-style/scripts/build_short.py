@@ -3,7 +3,7 @@
   python scripts/build_short.py edl.json -o out.mp4        # see ../examples/edl.example.json
 
 Inputs are two synced camera files (top = the guest/woman side, bottom = the host/man side, as in the reference clips).
-Each shot is either a stacked split-screen of both cameras or a close-up of one. The hook title is laid out
+Each shot is a stacked split-screen of both cameras, a close-up of one, or a full-frame B-roll file (video, gif or image; the main audio keeps playing). The hook title is laid out
 automatically (every line scaled so its ink is ~835 px wide, stacked, centred at 534,938), then the transparent
 watermark is laid over the video part, the purple end card is appended, and loudness is set to -16 LUFS.
 All numbers come from ../style.json / ../style-guide.md. Needs ffmpeg with libass, Python 3.9+, numpy.
@@ -139,32 +139,45 @@ def crop_expr(cam_w, cam_h, aspect, zoom, cx):
     return f"crop={cw:.2f}:{ch:.2f}:{x:.2f}:{y:.2f}"
 
 
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def cover(w=W, h=H):
+    """Fill the frame (crop the overflow), same pixel format and rate as every other shot."""
+    return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={FPS},setsar=1"
+
+
 def render_shot(i, shot, edl, sizes, work):
     cams = edl["cams"]
     t0, t1 = shot["t0"], shot["t1"]
     n = frame_count(t1 - t0)
     dur = n / FPS
     out = work / f"part{i:03d}.mov"
-    ins, graph = [], []
+    ins, graph, count = [], [], [0]
 
-    def add(src):
-        ins.extend(["-ss", f"{t0:.3f}", "-t", f"{dur + 0.5:.3f}", "-i", str(src)])
-        return len(ins) // 6 - 1
+    def add(src, pre=(), seek=None):
+        ins.extend([*pre, *(["-ss", f"{seek:.3f}"] if seek is not None else []), "-t", f"{dur + 0.5:.3f}", "-i", str(src)])
+        count[0] += 1
+        return count[0] - 1
 
     if shot["layout"] == "split":
         top, bot = cams["top"], cams["bottom"]
-        a, b = add(top), add(bot)
+        a, b = add(top, seek=t0), add(bot, seek=t0)
         s = shot.get("zoom", edl.get("split_zoom", 1.0))
         graph = [f"[{a}:v]{crop_expr(*sizes['top'], W / (H / 2), shot.get('zoom_top', s), shot.get('cx_top', 0.5))},scale={W}:{H // 2},setsar=1[t]",
                  f"[{b}:v]{crop_expr(*sizes['bottom'], W / (H / 2), shot.get('zoom_bottom', s), shot.get('cx_bottom', 0.5))},scale={W}:{H // 2},setsar=1[b]",
                  "[t][b]vstack=inputs=2[v]"]
+    elif shot["layout"] == "broll":
+        f = Path(shot["file"])
+        still = f.suffix.lower() in IMAGE_EXT
+        a = add(f, pre=["-loop", "1", "-framerate", str(FPS)] if still else ["-stream_loop", "-1"], seek=None if still else shot.get("from", 0.0))
+        graph = [f"[{a}:v]{cover()}[v]"]
     else:
         key = shot["cam"]
-        a = add(cams[key])
+        a = add(cams[key], seek=t0)
         graph = [f"[{a}:v]{crop_expr(*sizes[key], W / H, shot.get('zoom', edl.get('cu_zoom', 1.0)), shot.get('cx', 0.5))},scale={W}:{H},setsar=1[v]"]
     aud = edl.get("audio", "bottom")
-    src = cams.get(aud, aud)
-    ai = add(src)
+    ai = add(cams.get(aud, aud), seek=t0)
     graph.append(f"[{ai}:a]aresample=48000,apad=whole_dur={dur:.4f},atrim=0:{dur:.4f},aformat=channel_layouts=stereo[a]")
     cmd = ["ffmpeg", "-v", "error", "-y", *ins, "-filter_complex", ";".join(graph), "-map", "[v]", "-map", "[a]", "-r", str(FPS),
            "-frames:v", str(n), "-c:v", "libx264", "-crf", "12", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-ar", "48000", str(out)]
@@ -245,8 +258,13 @@ def main():
         if need not in edl["cams"]:
             sys.exit(f"edl.cams needs '{need}'")
     for s in edl["shots"]:
-        if s["layout"] not in ("split", "cu") or (s["layout"] == "cu" and s.get("cam") not in edl["cams"]):
+        if s["layout"] not in ("split", "cu", "broll") or (s["layout"] == "cu" and s.get("cam") not in edl["cams"]):
             sys.exit(f"bad shot: {s}")
+        if s["layout"] == "broll":
+            f = Path(s.get("file", ""))
+            s["file"] = str(f if f.is_absolute() else base / f)
+            if not Path(s["file"]).is_file():
+                sys.exit(f"b-roll file not found: {s['file']}")
         if s["t1"] <= s["t0"]:
             sys.exit(f"shot ends before it starts: {s}")
     fonts = a.fonts or next((str(p / "fonts") for p in SKILL.parents if (p / "fonts" / FONT_FILE).exists()), None)

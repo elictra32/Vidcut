@@ -63,3 +63,53 @@ def test_title_is_centred_and_fades_for_a_second(short):
 def test_end_card_is_silent_and_loudness_is_on_target(short):
     a = short[0]["audio"]
     assert a["end_card_max_volume_db"] <= -80 and abs(a["lufs"] + 16) <= 1
+
+
+CUE = """# Cue Sheet
+
+| # | Timestamp | Beat / line | Visual idea | Options |
+|---|-----------|-------------|-------------|---------|
+| 1 | 00:00–00:03 | HOOK — "ตลาด หุ้น ตก" | chaos | `01_hook_a.gif` 🎞️ · `01_hook_b.mp4` 🎬 · `01_hook_c.png` ✨ |
+| 2 | 00:03–00:05 | "ผมแพ้ ทุกวัน" | calm | `02_x.png` 🖼️ |
+"""
+
+
+def test_cue_sheet_to_shots_and_scenes(tmp_path):
+    import cue_to_edl
+    (tmp_path / "cue-sheet.md").write_text(CUE, encoding="utf-8")
+    for n in ("01_hook_a.gif", "01_hook_b.mp4", "01_hook_c.png", "02_x.png"):
+        (tmp_path / n).write_bytes(b"x")
+    beats = cue_to_edl.parse(CUE)
+    assert [(b["t0"], b["t1"]) for b in beats] == [(0, 3), (3, 5)] and beats[0]["text"] == "ตลาด หุ้น ตก"
+    assert cue_to_edl.pick(beats[0]["files"], ["video", "gif", "image"], False) == "01_hook_b.mp4"
+    assert cue_to_edl.pick(beats[0]["files"], ["gif", "video", "image"], True) == "01_hook_b.mp4"   # --skip-gif never returns the gif
+    assert cue_to_edl.pick(beats[1]["files"], ["video", "gif"], False) is None
+
+
+def test_broll_shot_and_text_scene_media(tmp_path):
+    if not _libass():
+        pytest.skip("ffmpeg without libass")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=2", "-pix_fmt", "yuv420p", str(tmp_path / "clip.mp4")], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=400x400", "-frames:v", "1", str(tmp_path / "still.png")], check=True)
+    for name, col in (("cam_top", "0x1c2f6e"), ("cam_bottom", "0xc8aa78")):
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={col}:s=1280x720:r=25:d=8", "-f", "lavfi", "-i", "sine=f=220:r=48000:d=8",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", str(tmp_path / f"{name}.mp4")], check=True)
+    edl = {"cams": {"top": "cam_top.mp4", "bottom": "cam_bottom.mp4"}, "audio": "bottom",
+           "shots": [{"layout": "split", "t0": 0, "t1": 2}, {"layout": "broll", "file": "clip.mp4", "t0": 2, "t1": 5},
+                     {"layout": "broll", "file": "still.png", "t0": 5, "t1": 6.5}]}
+    (tmp_path / "edl.json").write_text(json.dumps(edl), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(SKILL / "scripts" / "build_short.py"), str(tmp_path / "edl.json"), "-o", str(tmp_path / "b.mp4")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    import measure
+    m = measure.measure(str(tmp_path / "b.mp4"))
+    assert abs(m["duration"] - (6.5 + 3.1)) < 0.1 and abs(m["end_card"]["start_s"] - 6.5) < 0.05
+    # the still is a solid red frame filling the picture
+    f = subprocess.run(["ffmpeg", "-v", "error", "-ss", "5.8", "-i", str(tmp_path / "b.mp4"), "-frames:v", "1", "-vf", "scale=4:4,format=rgb24", "-f", "rawvideo", "-"], capture_output=True).stdout
+    assert f[0] > 200 and f[1] < 60
+
+    scenes = {"scenes": [{"lines": ["แพ้", "คือชนะ"], "seconds": 2, "media": "clip.mp4"}, {"lines": ["จบ"], "seconds": 1.5}]}
+    (tmp_path / "scenes.json").write_text(json.dumps(scenes, ensure_ascii=False), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(SKILL / "scripts" / "text_short.py"), str(tmp_path / "scenes.json"), "-o", str(tmp_path / "t.mp4")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    d = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(tmp_path / "t.mp4")], capture_output=True, text=True).stdout)
+    assert abs(d - 3.5) < 0.1

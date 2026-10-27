@@ -38,3 +38,9 @@ python tools/install_skills.py install --user    # ลงเป็นของ�
 - Remotion / video-shotcraft: ฟรีสำหรับคนเดียวและทีมเล็ก บริษัทใหญ่ต้องซื้อ license (remotion.dev/license)
 - Lottie / Emil / GSAP / three.js ให้ผลเป็นโค้ดเว็บหรือ JSON ต้องเรนเดอร์เป็นวิดีโอพื้นใส (หรือใช้ Remotion / HyperFrames) ก่อนวางบนคลิป
 - Export จาก player ของ Lottie ได้ zip โปรเจกต์ ไม่ใช่วิดีโอ
+
+## เสริม: Media Finder (หา B-roll จากสคริปต์)
+
+อยู่ที่ `.claude/skills/media-finder/` (MIT, ของ @m.minnmin) พิมพ์ว่า "find b-roll for this" พร้อมแนบสคริปต์หรือเสียงพากย์
+จะได้โฟลเดอร์สื่อฟรี (Pexels, Iconify, Tenor) และ `cue-sheet.md` ต้องรันบนเครื่องของคุณ (เครื่องคลาวด์เข้าเว็บพวกนี้ไม่ได้)
+แล้วต่อเข้ากับคลิปได้ด้วย `thus-short-style/scripts/cue_to_edl.py` (ดู SKILL.md ของ thus-short-style)

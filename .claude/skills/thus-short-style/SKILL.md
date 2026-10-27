@@ -41,3 +41,10 @@ They were cut from the owner's own clips with `scripts/extract_assets.py ref/ep3
 `python .claude/skills/thus-short-style/scripts/text_short.py scenes.json -o out.mp4` turns a scene list (2-3 short lines + seconds each) into a silent
 1080x1920 short with the same title rules (fitted lines, white Prompt Medium, hard cuts). Example: `examples/best_loser_wins_60s.json`
 (60 s from the Best Loser Wins podcast script). No voice is generated; scene lengths are a reading pace, not tied to audio.
+
+## B-roll (from Media Finder)
+- `{"layout": "broll", "file": "x.mp4|x.gif|x.png", "t0": 2.0, "t1": 5.0}` in `edl.json` shows the file full-frame (cropped to fill, looped if shorter, `from` = start offset in a video)
+  while the main audio keeps playing. The measured THUS style has **no B-roll**, so use it only when the user asks for it; hard cuts in and out, no zoom.
+- `scripts/cue_to_edl.py cue-sheet.md --as shots` turns a Media Finder cue sheet into broll shots; `--as scenes` into text_short scenes with `media` backgrounds.
+  `--skip-gif` when the video may become a paid ad (Tenor GIFs are organic-only). Find the media itself with the `media-finder` skill on the user's machine
+  (this cloud sandbox cannot reach Pexels/Tenor/Iconify).
