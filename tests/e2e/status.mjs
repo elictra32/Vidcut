@@ -16,8 +16,8 @@ try {
   page.on("pageerror", (e) => problems.push(e.message));
   await page.goto(app.base);
   await page.waitForSelector(".clip-list li");
-  const job = async (title) => (await (await fetch(`${app.base}/api/covers`, { method: "POST", headers: j, body: JSON.stringify({ format: "vertical", items: [{ title }], date_text: "x", replace_intros: false }) })).json()).job;
-  const [a, b] = [await job("Alpha"), await job("Beta")];
+  const job = async (titles) => (await (await fetch(`${app.base}/api/covers`, { method: "POST", headers: j, body: JSON.stringify({ format: "vertical", items: titles.map((title) => ({ title })), date_text: "x", replace_intros: false }) })).json()).job;
+  const [a, b] = [await job(["Alpha"]), await job(["Beta 1", "Beta 2", "Beta 3", "Beta 4"])];   // B takes clearly longer, so A finishes first
   await page.evaluate(async ([a, b]) => {
     const s = await import("/status.js");
     window.__done = [];
@@ -29,7 +29,7 @@ try {
   await page.waitForFunction(() => window.__done.length === 1, null, { timeout: 120000 });
   const left = (await page.$$("#status .status-job[data-kind=job]")).length;
   const hidden = await page.$eval("#status", (e) => e.hidden);
-  must(left === 1 && !hidden || window.__done === 2, "when one job finishes the other one stays visible");
+  must(left === 1 && !hidden, "when one job finishes the other one stays visible");
   await page.waitForFunction(() => window.__done.length === 2, null, { timeout: 120000 });
   must(await page.$eval("#status", (e) => e.hidden), "the area hides when nothing is running");
   // the queue
