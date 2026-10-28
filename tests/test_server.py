@@ -1056,3 +1056,11 @@ def test_the_real_size_of_a_constant_quality_export_can_be_measured_from_samples
     assert done["state"] == "done", done
     r = done["result"]
     assert len(r["samples"]) >= 2 and 0 < r["bytes"] < est["bytes"]      # the real size is below the worst-case cap
+
+
+def test_a_cover_title_keeps_its_own_line_breaks_and_is_one_cover(client):
+    r = client.post("/api/covers", json={"format": "vertical", "items": [{"title": "Line one\n\n  Line   two "}], "date_text": "x"}).json()
+    done = wait_job(client, r["job"], timeout=120)
+    assert done["state"] == "done" and done["result"]["count"] == 1 and done["result"]["names"] == ["Line one Line two_vertical.mp4"]
+    too_many = client.post("/api/covers", json={"format": "vertical", "items": [{"title": "a\nb\nc\nd\ne"}], "date_text": "x"})
+    assert too_many.json()["error"]["code"] == "covers_invalid"

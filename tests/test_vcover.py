@@ -26,3 +26,14 @@ def test_every_listed_font_can_make_a_cover(tmp_path):
     assert {"Kanit Medium", "Mitr Medium", "Chakra Petch Medium", "Pridi Medium"} <= set(FONT_FILES)
     out = render_vertical_cover("intro", str(tmp_path / "c.mp4"), title="ตื่นได้แล้ว", date_text="วันที่ 22", title_font="Pridi Medium", date_font="Chakra Petch Medium")
     assert (tmp_path / "c.mp4").stat().st_size > 10000 and out.endswith("c.mp4")
+
+
+def test_line_breaks_typed_in_a_title_are_kept_and_too_long_lines_still_wrap():
+    lines, px = fit_title("Candlestick\nand Price Pattern", "Montserrat")
+    assert lines == ["Candlestick", "and Price Pattern"] and px == 68
+    four, _ = fit_title("a\nb\nc\nd", "Montserrat")
+    assert four == ["a", "b", "c", "d"]
+    typed, px_typed = fit_title("THUS Live Onsite (25/10/2026)\nเทรนด์น้ำมัน ทำพอร์ตเปลี่ยนหลัก EP.1", "Montserrat")
+    assert len(typed) == 2 and 48 <= px_typed < 68            # both typed lines stay whole, the size gives a little instead
+    long_lines, small = fit_title("Candlestick and Price Pattern II Part One of Two Today\nShort", "Montserrat")
+    assert long_lines[-1] == "Short" and len(long_lines) <= 3 and small <= 68

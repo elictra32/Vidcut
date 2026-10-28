@@ -27,7 +27,11 @@ try {
   must((await page.$eval("#cover-template", (s) => s.options.length)) >= 1 && (await page.$eval("#cover-template", (s) => s.value)) === tid, "the template list offers the intro clip");
   await page.fill("#cover-date", "2026-10-22");
   must((await page.inputValue("#cover-date-text")) === "วันที่ 22 ตุลาคม  2569", "picking a date fills in the Thai date text");
-  await page.fill("#cover-titles", "Episode One\nEpisode Two | วันที่ 5 พฤศจิกายน  2569");
+  await page.fill("#cover-titles", "Episode One");
+  await page.click("#btn-add-cover");
+  await page.locator("#cover-items .cover-item").nth(1).locator("textarea").fill("Episode Two");
+  await page.locator("#cover-items .cover-item").nth(1).locator(".cover-item-date").fill("วันที่ 5 พฤศจิกายน  2569");
+  must((await page.$$("#cover-items .cover-item")).length === 2, "+ Add another cover gives a second box");
   await page.click("#btn-make-covers");
   await page.waitForSelector(".toast:has-text('Made 2 cover')", { timeout: 120000 });
   const proj = (await (await fetch(`${app.base}/api/project`)).json()).project;
@@ -54,11 +58,14 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForSelector("dialog.cover-dialog", { state: "detached", timeout: 5000 });
   must(true, "Esc closes the large preview");
-  await page.fill("#cover-titles", "Vertical One");
+  await page.locator("#cover-items .cover-item").nth(1).locator(".cover-remove").click();
+  must((await page.$$("#cover-items .cover-item")).length === 1, "a cover box can be removed");
+  await page.fill("#cover-titles", "Vertical\nOne");   // Enter inside a box is a line break on the cover, not a second cover
   await page.click("#btn-make-covers");
   await page.waitForSelector(".toast:has-text('Made 1 cover')", { timeout: 120000 });
   const vp = (await (await fetch(`${app.base}/api/project`)).json()).project;
   const vc = vp.clips.filter((c) => c.role !== "main");
+  must(vc[0].path.split(/[\\/]/).pop() === "Vertical One_vertical.mp4", "one box with a line break makes ONE cover, named with a space for the break: " + vc[0].path.split(/[\\/]/).pop());
   must(vc.map((c) => c.role).join() === "intro,outro" && vc.every((c) => c.width === 1080 && c.height === 1920), "a vertical intro and outro (1080x1920) were made");
   // a cover can be opened from the clip list and played on its own (it used to jump back to the main video)
   await page.locator(".clip-list li", { hasText: "Intro for EP 1" }).locator(".clip-main").click();

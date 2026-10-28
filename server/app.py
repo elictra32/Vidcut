@@ -556,6 +556,10 @@ def create_app(home: str | None = None) -> FastAPI:
 
         return {"job": st.jobs.submit(lambda progress, cancel: run_single_export(snap, progress, cancel), "export")}
 
+    def clean_title(raw) -> str:
+        """A cover title keeps the line breaks the user typed; each line is tidied and empty lines are dropped."""
+        return "\n".join(l for l in (" ".join(line.split()) for line in str(raw or "").splitlines()) if l)
+
     # ---- episode covers made from the THUS intro template ------------------------------------------
     @app.post("/api/covers")
     def post_covers(body: dict):
@@ -565,9 +569,9 @@ def create_app(home: str | None = None) -> FastAPI:
             raise AppError("covers_invalid", "Give between 1 and 50 titles")
         titles = []
         for it in items:
-            t = " ".join(str(it.get("title", "")).split())
-            if not t or len(t) > 120:
-                raise AppError("covers_invalid", "Each title must be 1–120 characters")
+            t = clean_title(it.get("title", ""))
+            if not t or len(t.replace("\n", " ")) > 120 or t.count("\n") > 3:
+                raise AppError("covers_invalid", "Each title must be 1–120 characters, in at most 4 lines")
             titles.append((t, str(it.get("date_text") or "").strip()))
         vertical = body.get("format") == "vertical"
         if vertical:
@@ -605,7 +609,7 @@ def create_app(home: str | None = None) -> FastAPI:
             made = []
             for i, (title, date_text) in enumerate(titles):
                 progress(i / len(titles), f"Cover {i + 1}/{len(titles)}: {title}")
-                stem, n = safe_stem(title) + ("_vertical" if vertical else ""), 1
+                stem, n = safe_stem(title.replace("\n", " ")) + ("_vertical" if vertical else ""), 1
                 while os.path.exists(os.path.join(st.covers, f"{stem}{'' if n == 1 else f'_{n}'}.mp4")):
                     n += 1
                 out = os.path.join(st.covers, f"{stem}{'' if n == 1 else f'_{n}'}.mp4")
@@ -647,7 +651,7 @@ def create_app(home: str | None = None) -> FastAPI:
     @app.post("/api/covers/preview")
     def post_covers_preview(body: dict):
         """One quick PNG of a cover with the chosen text and fonts, so they can be judged before making the clips."""
-        title = " ".join(str(body.get("title") or "").split())[:120] or "Episode title"
+        title = clean_title(body.get("title"))[:120] or "Episode title"
         date_text = str(body.get("date_text") or "").strip() or "วันที่ 1 มกราคม  2570"
         kind = "outro" if body.get("kind") == "outro" else "intro"
         title_font, date_font = str(body.get("title_font") or "Montserrat"), str(body.get("date_font") or "Prompt Light")

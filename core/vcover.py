@@ -28,6 +28,17 @@ DURATION = {"intro": 3.1, "outro": 3.0}
 DEFAULT_OUTRO_TEXT = "ขอบคุณที่รับชม\nติดตาม THUS ไว้\nไม่พลาดตอนต่อไป"
 
 
+LATIN_ONLY = {"Montserrat", "Montserrat Medium"}   # no Thai letters: libass draws those from another font (Prompt)
+
+
+def advance(font: str, text: str, px: float, spacing: float = 0.0) -> float:
+    """Width of the text as it will really be drawn: Thai letters in a Latin-only font are measured in the fallback font."""
+    if font not in LATIN_ONLY or not re.search("[\u0e00-\u0e7f]", text):
+        return text_advance(font, text, px, spacing)
+    return sum(text_advance("Prompt" if re.match("[\u0e00-\u0e7f]", run) else font, run, px, spacing)
+               for run in re.findall("[\u0e00-\u0e7f]+|[^\u0e00-\u0e7f]+", text))
+
+
 def pill(w: float, h: float) -> str:
     """An ASS drawing of a rounded bar (fully round ends), centred on its own box."""
     r, k = h / 2, 0.5523 * h / 2
@@ -45,7 +56,7 @@ def wrap(text: str, font: str, px: float, max_w: float, spacing: float = 0.0) ->
     lines, cur = [], ""
     for w in words:
         trial = cur + w
-        if cur and text_advance(font, trial.strip(), px, spacing) > max_w:
+        if cur and advance(font, trial.strip(), px, spacing) > max_w:
             lines.append(cur.strip())
             cur = w.lstrip()
         else:
@@ -62,12 +73,20 @@ def letter_spacing(text: str) -> float:
 
 
 def fit_title(title: str, font: str, spacing: float = 1.5) -> tuple[list[str], float]:
-    """The largest size (from 68 px down) at which the title fits in at most 3 lines of the box."""
+    """Lines and size for the title. Line breaks the user typed are kept (each line is only wrapped further when it is too
+    wide); otherwise the text is wrapped by width. The largest size (from 68 px down) that fits in 3 lines (or as many as
+    were typed, up to 4)."""
+    manual = [ln.strip() for ln in title.splitlines() if ln.strip()] or [""]
+    max_lines = min(4, max(3, len(manual)))
+    if len(manual) > 1:   # the user chose the breaks: shrink a little rather than cut a line again, down to a readable size
+        for px in (68, 60, 54, 48):
+            if all(advance(font, ln, px, spacing) <= BOX_W for ln in manual) and len(manual) <= max_lines:
+                return manual, px
     for px in (68, 60, 54, 48, 42):
-        lines = wrap(title, font, px, BOX_W, spacing)
-        if len(lines) <= 3:
+        lines = [part for ln in manual for part in wrap(ln, font, px, BOX_W, spacing)]
+        if len(lines) <= max_lines:
             return lines, px
-    return wrap(title, font, 42, BOX_W, spacing)[:3], 42
+    return [part for ln in manual for part in wrap(ln, font, 42, BOX_W, spacing)][:max_lines], 42
 
 
 def build_ass(kind: str, title: str, date_text: str, outro_text: str, title_font: str, date_font: str, outro_font: str) -> str:

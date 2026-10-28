@@ -11,12 +11,15 @@ export const thaiDate = (iso) => {
   return `วันที่ ${d} ${MONTHS[m - 1]}  ${y + 543}`; // Buddhist-era year, two spaces before it as in the sample covers
 };
 
-/** Lines of "Title" or "Title | date text" -> [{ title, date_text? }]. */
-export function parseTitles(text) {
-  return text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
-    const [title, ...rest] = l.split("|");
-    const date_text = rest.join("|").trim();
-    return { title: title.trim(), ...(date_text ? { date_text } : {}) };
+/**
+ * The covers to make, from the list on screen: [{ title, date }] -> [{ title, date_text? }]. A title keeps its own line breaks
+ * (Enter inside a title = a new line ON that cover); blank lines and empty covers are dropped.
+ */
+export function cleanItems(items) {
+  return items.map((it) => {
+    const title = String(it.title ?? "").split(/\r?\n/).map((l) => l.trim().replace(/\s+/g, " ")).filter(Boolean).join("\n");
+    const date_text = String(it.date ?? "").trim();
+    return { title, ...(date_text ? { date_text } : {}) };
   }).filter((it) => it.title);
 }
 
@@ -28,9 +31,30 @@ export function initCovers() {
   const date = el("input", { type: "date", id: "cover-date", value: iso });
   const dateText = el("input", { type: "text", id: "cover-date-text", value: thaiDate(iso) });
   date.addEventListener("change", () => date.value && (dateText.value = thaiDate(date.value)));
-  const titles = el("textarea", { id: "cover-titles", rows: 5, placeholder: "One episode title per line, e.g.\nCandlestick and Price Pattern II P1\nCandlestick and Price Pattern II P2\n\nTo give one episode its own date: Title | วันที่ 5 พฤศจิกายน  2569" });
-  titles.value = recall("vidcut.coverTitles", "");
-  titles.addEventListener("change", () => remember("vidcut.coverTitles", titles.value));
+  // one box per cover: Enter inside a box breaks the line on that cover; "+ Add another cover" makes one more clip
+  let items = [{ title: "", date: "" }];
+  try {
+    const saved = JSON.parse(recall("vidcut.coverItems", "null"));
+    if (Array.isArray(saved) && saved.length) items = saved.map((x) => ({ title: String(x.title ?? ""), date: String(x.date ?? "") }));
+  } catch { /* a damaged saved list: start with one empty cover */ }
+  const itemsBox = el("div", { id: "cover-items" });
+  const saveItems = () => remember("vidcut.coverItems", JSON.stringify(items));
+  const renderItems = () => {
+    itemsBox.replaceChildren(...items.map((it, i) => {
+      const ta = el("textarea", { class: "cover-title", rows: 2, "aria-label": `Title of cover ${i + 1}`,
+        placeholder: "Title of this cover. Press Enter to start a new line on the cover." });
+      if (i === 0) ta.id = "cover-titles";
+      ta.value = it.title;
+      ta.addEventListener("input", () => { it.title = ta.value; saveItems(); });
+      const dt = el("input", { type: "text", class: "cover-item-date", "aria-label": `Date text of cover ${i + 1}`, placeholder: "Own date text (empty = the date above)", value: it.date });
+      dt.addEventListener("input", () => { it.date = dt.value; saveItems(); });
+      for (const c of [ta, dt]) { c.addEventListener("input", () => refreshPreview()); }
+      return el("div", { class: "cover-item", "data-i": i },
+        el("div", { class: "row" }, el("strong", { class: "small" }, `Cover ${i + 1}`), el("span", { class: "spacer" }),
+          items.length > 1 ? el("button", { class: "ghost icon cover-remove", title: "Remove this cover", onclick: () => { items.splice(i, 1); saveItems(); renderItems(); refreshPreview(); } }, "✕") : ""),
+        ta, dt);
+    }), el("button", { id: "btn-add-cover", class: "small", onclick: () => { items.push({ title: "", date: "" }); saveItems(); renderItems(); itemsBox.querySelector(".cover-item:last-of-type textarea")?.focus(); } }, "+ Add another cover"));
+  };
   const replace = el("input", { type: "checkbox", id: "cover-replace", checked: true });
   // the font list arrives with the project (after this panel is built), so the options are filled in on every load
   const titleFont = el("select", { id: "cover-title-font" }), dateFont = el("select", { id: "cover-date-font" }), outroFont = el("select", { id: "cover-outro-font" });
@@ -128,7 +152,7 @@ export function initCovers() {
         return;
       }
       previewNote.textContent = "Drawing the preview…";
-      const base = { format: vertical ? "vertical" : "landscape", template_clip_id: template.value, title: parseTitles(titles.value)[0]?.title || "Episode title",
+      const base = { format: vertical ? "vertical" : "landscape", template_clip_id: template.value, title: cleanItems(items)[0]?.title || "Episode title",
         date_text: dateText.value.trim(), title_font: titleFont.value, date_font: dateFont.value, outro_font: outroFont.value, outro_text: outroText.value };
       try {
         const front = await fetchPng({ ...base, kind: "intro" });
@@ -145,24 +169,24 @@ export function initCovers() {
       }
     }, 600);
   };
-  for (const c of [titles, dateText, date, template, format, titleFont, dateFont, outroFont, outroText, withOutro]) {
+  for (const c of [dateText, date, template, format, titleFont, dateFont, outroFont, outroText, withOutro]) {
     c.addEventListener("input", refreshPreview);
     c.addEventListener("change", refreshPreview);
   }
 
   make.addEventListener("click", async () => {
-    const items = parseTitles(titles.value);
+    const covers = cleanItems(items);
     const vertical = format.value === "vertical";
     if (!vertical && !template.value) return showToast("Add one of your existing cover clips first (set its role to Intro): the new covers copy its look", "error", 6000);
-    if (!items.length) return showToast("Type at least one episode title", "error");
+    if (!covers.length) return showToast("Type at least one episode title", "error");
     if (!dateText.value.trim()) return showToast("Type the date text, or pick a date", "error");
-    if (replace.checked && !confirm(`Make ${items.length} cover(s) and replace the current Intro clips in the project? (Your files are not deleted.)`)) return;
+    if (replace.checked && !confirm(`Make ${covers.length} cover(s) and replace the current Intro clips in the project? (Your files are not deleted.)`)) return;
     make.disabled = true;
     try {
       const { job } = await withSavedProject(() => api("POST", "/api/covers", {
         format: vertical ? "vertical" : "landscape", with_outro: withOutro.checked, outro_text: outroText.value,
         intro_sound_clip_id: introSound.value || null, outro_sound_clip_id: outroSound.value || null,
-        template_clip_id: template.value, items, date_text: dateText.value.trim(), replace_intros: replace.checked,
+        template_clip_id: template.value, items: covers, date_text: dateText.value.trim(), replace_intros: replace.checked,
         title_font: titleFont.value, date_font: dateFont.value, outro_font: outroFont.value }));
       const done = await trackJob("Making covers", job);
       if (!done) return;
@@ -182,7 +206,7 @@ export function initCovers() {
     templateField, verticalBox,
     el("label", { class: "field" }, el("span", {}, "Date"), date),
     el("label", { class: "field" }, el("span", {}, "Date text on the cover"), dateText),
-    el("label", { class: "field" }, el("span", {}, "Episode titles"), titles),
+    el("div", { class: "field" }, el("span", {}, "Cover titles (one box per cover)"), itemsBox),
     el("label", { class: "field inline" }, el("span", {}, "Replace the current Intro (and Outro) clips"), replace),
     el("details", {}, el("summary", {}, "Fonts"),
       el("label", { class: "field" }, el("span", {}, "Title (front cover)"), titleFont), el("label", { class: "field" }, el("span", {}, "Date (front cover)"), dateFont),
@@ -192,6 +216,7 @@ export function initCovers() {
     make);
   subscribe((why) => { if (why === "load") { fillFonts(); refreshPreview(); } if (why === "load" || why === "keeps" || why === "edit") { fillTemplates(); fillSounds(); } });
   fillTemplates();
+  renderItems();
   fillFonts();
   fillSounds();
   syncFormat();
