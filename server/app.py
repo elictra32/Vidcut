@@ -32,7 +32,7 @@ from core.episodes import clip_video_kbps, plan_episodes
 from core.export import export_duration, manifest_path, render_preview_frame, run_export
 from core.fonts import FONT_FILES
 from core.grade import clamp as clamp_grade
-from core.media import FFmpegError, color_matrix_of, is_browser_playable, is_full_range, make_proxy, probe
+from core.media import FFmpegError, color_matrix_of, has_audio_stream, is_browser_playable, is_full_range, make_proxy, probe
 from core.models import ROLES, Clip, Keep, Overlay, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
@@ -89,8 +89,17 @@ class State:
         raise AppError("clip_not_found", "Clip not found in the project", status=404)
 
 
-def _pick_file(images: bool = False) -> str | None:
-    override = os.environ.get("VIDCUT_PICK_IMAGE_OVERRIDE" if images else "VIDCUT_PICK_OVERRIDE")
+class FreshStaticFiles(StaticFiles):
+    """The app's own pages: the browser must re-check them every time, otherwise an updated Vidcut keeps showing the old
+    page until a hard refresh."""
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+def _pick_file(images: bool = False, sound: bool = False) -> str | None:
+    override = os.environ.get("VIDCUT_PICK_SOUND_OVERRIDE" if sound else "VIDCUT_PICK_IMAGE_OVERRIDE" if images else "VIDCUT_PICK_OVERRIDE")
     if override:
         return override
     try:
@@ -104,8 +113,9 @@ def _pick_file(images: bool = False) -> str | None:
     root.attributes("-topmost", True)
     try:
         return filedialog.askopenfilename(
-            title="Choose an image" if images else "Choose video",
+            title="Choose an image" if images else "Choose a sound or video file" if sound else "Choose video",
             filetypes=[("Images", "*.png *.jpg *.jpeg *.webp *.bmp"), ("All files", "*.*")] if images
+            else [("Sound or video", "*.mp3 *.wav *.m4a *.aac *.flac *.ogg *.mp4 *.mov *.mkv *.avi *.webm *.m4v"), ("All files", "*.*")] if sound
             else [("Video", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v"), ("All files", "*.*")]) or None
     finally:
         root.destroy()
@@ -593,11 +603,19 @@ def create_app(home: str | None = None) -> FastAPI:
         title_font, date_font = str(body.get("title_font") or "Montserrat"), str(body.get("date_font") or "Sarabun")
         outro_font = str(body.get("outro_font") or "Prompt Light")
 
-        def sound_of(key):   # the sound for a vertical cover comes from a clip already in the project (the file stays on disk)
-            cid = body.get(key)
-            if not cid:
+        def sound_of(key):   # a clip already in the project, or any sound/video file picked from the disk
+            raw = body.get(key)
+            if not raw:
                 return None
-            clip = st.clip(str(cid))
+            raw = str(raw)
+            if raw.startswith("file:"):
+                path = os.path.abspath(raw[5:])
+                if not os.path.isfile(path):
+                    raise AppError("file_missing", "The sound file was not found", "Choose it again", path, status=404)
+                if not has_audio_stream(path):
+                    raise AppError("sound_no_audio", "That file has no sound to use", "Pick a file that has sound, or silence")
+                return path
+            clip = st.clip(raw)
             if not clip.has_audio:
                 raise AppError("sound_no_audio", "That clip has no sound to use", "Pick a clip that has sound, or silence")
             return clip.path
@@ -647,6 +665,20 @@ def create_app(home: str | None = None) -> FastAPI:
             progress(1.0, "Done")
             return {"count": len(made), "dir": st.covers, "names": [os.path.basename(p) for p in made], "outro": bool(outro_file)}
         return {"job": st.jobs.submit(work, "covers")}
+
+    @app.post("/api/covers/pick-sound")
+    def post_pick_sound():
+        """Let the user choose any sound or video file to use as a cover's sound (its audio is taken from the start)."""
+        path = _pick_file(sound=True)
+        if not path:
+            return {"path": None}
+        try:
+            has_audio = has_audio_stream(path)
+        except FFmpegError as e:
+            raise AppError("unreadable_media", "This file is damaged or unreadable", "Try another file", e.details) from e
+        if not has_audio:
+            raise AppError("sound_no_audio", "That file has no sound to use", "Pick a file that has sound")
+        return {"path": os.path.abspath(path), "name": os.path.basename(path)}
 
     @app.post("/api/covers/preview")
     def post_covers_preview(body: dict):
@@ -1061,7 +1093,7 @@ def create_app(home: str | None = None) -> FastAPI:
     if FONTS_DIR.is_dir():  # bundled Thai fonts, so the browser preview matches the export
         app.mount("/fonts", StaticFiles(directory=str(FONTS_DIR)), name="fonts")
     if WEB_DIR.is_dir():
-        app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+        app.mount("/", FreshStaticFiles(directory=str(WEB_DIR), html=True), name="web")
     return app
 
 

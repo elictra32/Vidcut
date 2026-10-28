@@ -1064,3 +1064,26 @@ def test_a_cover_title_keeps_its_own_line_breaks_and_is_one_cover(client):
     assert done["state"] == "done" and done["result"]["count"] == 1 and done["result"]["names"] == ["Line one Line two_vertical.mp4"]
     too_many = client.post("/api/covers", json={"format": "vertical", "items": [{"title": "a\nb\nc\nd\ne"}], "date_text": "x"})
     assert too_many.json()["error"]["code"] == "covers_invalid"
+
+
+def test_a_sound_file_picked_from_the_disk_can_be_a_cover_sound(client, tmp_path, monkeypatch):
+    import subprocess
+    wav = str(tmp_path / "jingle.wav")
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=660:duration=2", wav], check=True)   # audio only, no video stream
+    monkeypatch.setenv("VIDCUT_PICK_SOUND_OVERRIDE", wav)
+    picked = client.post("/api/covers/pick-sound").json()
+    assert picked["path"] == wav and picked["name"] == "jingle.wav"
+    r = client.post("/api/covers", json={"format": "vertical", "items": [{"title": "Sound"}], "date_text": "x", "with_outro": False,
+                                         "intro_sound_clip_id": f"file:{wav}"}).json()
+    assert wait_job(client, r["job"], timeout=120)["state"] == "done"
+    path = get_project(client)["clips"][0]["path"]
+    err = subprocess.run(["ffmpeg", "-i", path, "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True).stderr
+    assert float(next(l for l in err.splitlines() if "mean_volume" in l).split("mean_volume:")[1].split("dB")[0]) > -40
+    silent = str(tmp_path / "v.mp4")
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=64x64:d=1", silent], check=True)
+    bad = client.post("/api/covers", json={"format": "vertical", "items": [{"title": "x"}], "intro_sound_clip_id": f"file:{silent}"})
+    assert bad.json()["error"]["code"] == "sound_no_audio"
+
+
+def test_the_apps_own_pages_are_revalidated_so_an_update_shows_without_a_hard_refresh(client):
+    assert client.get("/covers.js").headers["cache-control"] == "no-cache"

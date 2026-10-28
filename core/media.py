@@ -63,6 +63,16 @@ def probe(path: str) -> dict:
     }
 
 
+def has_audio_stream(path: str) -> bool:
+    """True when the file (video OR a plain sound file) has an audio stream."""
+    _, ffprobe = find_ffmpeg()
+    r = subprocess.run([ffprobe, "-v", "error", "-print_format", "json", "-show_streams", path],
+                       capture_output=True, text=True, encoding="utf-8", **no_window())
+    if r.returncode != 0:
+        raise FFmpegError("probe failed", r.stderr[-2000:])
+    return any(s.get("codec_type") == "audio" for s in json.loads(r.stdout).get("streams", []))
+
+
 def _rotation(stream: dict) -> int:
     for sd in stream.get("side_data_list", []) or []:
         if "rotation" in sd:

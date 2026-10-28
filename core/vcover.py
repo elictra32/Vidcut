@@ -13,7 +13,7 @@ import numpy as np
 
 from core.cover import CoverError, _ass_color, _escape, _run, _ts
 from core.fonts import FONT_FILES, FONTS_DIR, ass_size_factor, text_advance
-from core.media import FFmpegError, find_ffmpeg, no_window, probe
+from core.media import FFmpegError, find_ffmpeg, has_audio_stream, no_window
 from core.names import safe_stem  # noqa: F401
 
 VW, VH = 1080, 1920
@@ -173,7 +173,7 @@ def render_vertical_cover(kind: str, out_path: str, *, title: str = "", date_tex
     end = DURATION[kind]
     if sound:
         try:
-            if not probe(sound)["has_audio"]:
+            if not has_audio_stream(sound):
                 raise CoverError("sound_no_audio", "That clip has no sound to use", sound)
         except FFmpegError as e:
             raise CoverError("unreadable_media", "The sound file is damaged or unreadable", e.details) from e

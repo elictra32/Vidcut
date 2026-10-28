@@ -83,18 +83,33 @@ export function initCovers() {
     el("label", { class: "field inline" }, el("span", {}, "Also make a matching back cover (outro)"), withOutro),
     el("label", { class: "field" }, el("span", {}, "Back cover text (one line each)"), outroText),
     el("label", { class: "field" }, el("span", {}, "Sound of the front cover"), introSound),
+    el("button", { class: "ghost small", id: "btn-pick-intro-sound", onclick: () => chooseSound(introSound)() }, "Choose a sound file for the front…"),
     el("label", { class: "field" }, el("span", {}, "Sound of the back cover"), outroSound),
-    el("p", { class: "muted small" }, "The sound is taken from a clip in this project (for example your landscape intro or outro), from its start, faded out at the end. (silence) = no sound."));
+    el("button", { class: "ghost small", id: "btn-pick-outro-sound", onclick: () => chooseSound(outroSound)() }, "Choose a sound file for the back…"),
+    el("p", { class: "muted small" }, "The sound comes from a clip in this project (for example your landscape intro or outro) or from any sound/video file you choose, from its start, faded out at the end. (silence) = no sound. The covers Vidcut drew itself have no real sound."));
   const fillSounds = () => {
     const clips = (getProject()?.clips ?? []).filter((c) => c.has_audio);
     const label = (c) => `${basename(c.path)}${(c.role ?? "main") === "main" ? "" : ` (${c.role})`}`;
+    // the covers Vidcut drew itself are silent: they are listed but never the default source of a sound
+    const real = clips.filter((c) => !/_vertical\.mp4$|^THUS_outro_vertical/i.test(basename(c.path)));
     for (const [sel, role] of [[introSound, "intro"], [outroSound, "outro"]]) {
       const keep = sel.value;
-      sel.replaceChildren(el("option", { value: "" }, "(silence)"), ...clips.map((c) => el("option", { value: c.id }, label(c))));
-      // by default take the sound of the cover you already have (your landscape intro / outro), if there is one
-      const first = clips.find((c) => c.role === role) ?? (role === "outro" ? null : clips.find((c) => c.role === "intro"));
-      sel.value = clips.some((c) => c.id === keep) || keep === "" && sel.dataset.touched ? keep : first?.id ?? "";
+      const custom = [...sel.querySelectorAll("option[data-file]")];   // a file picked from the disk stays offered
+      sel.replaceChildren(el("option", { value: "" }, "(silence)"), ...clips.map((c) => el("option", { value: c.id }, label(c))), ...custom);
+      const first = real.find((c) => c.role === role) ?? (role === "outro" ? null : real.find((c) => c.role === "intro"));
+      const stillThere = clips.some((c) => c.id === keep) || custom.some((o) => o.value === keep);
+      sel.value = stillThere || (keep === "" && sel.dataset.touched) ? keep : first?.id ?? "";
     }
+  };
+  const chooseSound = (sel) => async () => {
+    try {
+      const r = await api("POST", "/api/covers/pick-sound");
+      if (!r.path) return;
+      const value = `file:${r.path}`;
+      if (![...sel.options].some((o) => o.value === value)) sel.append(el("option", { value, "data-file": "1" }, `${r.name} (file)`));
+      sel.value = value;
+      sel.dataset.touched = "1";
+    } catch (e) { showError(e); }
   };
   for (const sel of [introSound, outroSound]) sel.addEventListener("change", () => (sel.dataset.touched = "1"));
   const syncFormat = () => {
