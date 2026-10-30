@@ -1087,3 +1087,8 @@ def test_a_sound_file_picked_from_the_disk_can_be_a_cover_sound(client, tmp_path
 
 def test_the_apps_own_pages_are_revalidated_so_an_update_shows_without_a_hard_refresh(client):
     assert client.get("/covers.js").headers["cache-control"] == "no-cache"
+
+
+def test_ping_reports_the_version_so_the_page_can_show_which_copy_is_running(client):
+    v = client.get("/api/ping").json()["version"]
+    assert v == "" or (4 <= len(v) <= 12 and all(c in "0123456789abcdef" for c in v))

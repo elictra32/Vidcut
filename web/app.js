@@ -19,6 +19,7 @@ import { initColorPanel } from "./color_panel.js";
 import { $ } from "./util.js";
 
 async function main() {
+  fetch("/api/ping").then((r) => r.json()).then((p) => { if (p.version) $("#app-version").textContent = p.version; }).catch(() => {});
   initClipsPanel();
   initCovers();
   initSilencePanel();

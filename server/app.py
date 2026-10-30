@@ -5,6 +5,7 @@ import mimetypes
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -32,7 +33,7 @@ from core.episodes import clip_video_kbps, plan_episodes
 from core.export import export_duration, manifest_path, render_preview_frame, run_export
 from core.fonts import FONT_FILES
 from core.grade import clamp as clamp_grade
-from core.media import FFmpegError, color_matrix_of, has_audio_stream, is_browser_playable, is_full_range, make_proxy, probe
+from core.media import FFmpegError, no_window, color_matrix_of, has_audio_stream, is_browser_playable, is_full_range, make_proxy, probe
 from core.models import ROLES, Clip, Keep, Overlay, Project, Selection, project_from_dict, project_to_dict
 from core.presets import PRESETS
 from core.silence import detect_silences, keeps_from_silences
@@ -172,11 +173,20 @@ def create_app(home: str | None = None) -> FastAPI:
                     "presets": {k: asdict(v) for k, v in PRESETS.items()},
                     "fonts": list(FONT_FILES)}
 
+    def app_version() -> str:
+        """The short git commit this copy of Vidcut is at (what `git log -1 --oneline` shows), '' when not a git checkout."""
+        try:
+            r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(WEB_DIR.parent), capture_output=True, text=True, timeout=5, **no_window())
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    version = app_version()
+
     @app.get("/api/ping")
     def get_ping():
         """Pages ping every few seconds; also how a second launch learns that Vidcut is already running."""
         st.last_seen = time.time()
-        return {"app": "vidcut", "busy": st.jobs.active(ignore=("proxy",)) > 0}
+        return {"app": "vidcut", "version": version, "busy": st.jobs.active(ignore=("proxy",)) > 0}
 
     @app.post("/api/bye")
     def post_bye():
